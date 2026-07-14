@@ -53,6 +53,19 @@ class GenerationResult:
     metrics: GenerationMetrics
 
 
+@dataclass(frozen=True, slots=True)
+class ScoreResult:
+    """Aggregate negative log-likelihood of a text under the model.
+
+    ``negative_log_likelihood`` is a sum in nats over ``scored_tokens`` tokens;
+    perplexity is ``exp(nll / scored_tokens)``.
+    """
+
+    negative_log_likelihood: float
+    scored_tokens: int
+    windows: int
+
+
 @runtime_checkable
 class Runtime(Protocol):
     """Inference backend contract.
@@ -70,6 +83,23 @@ class Runtime(Protocol):
 
     def generate(self, prompt: str, *, max_tokens: int = 128) -> GenerationResult:
         """Generate a completion for ``prompt`` and measure it."""
+        ...
+
+    def score(
+        self,
+        text: str,
+        *,
+        max_context_tokens: int = 512,
+        max_windows: int | None = None,
+    ) -> ScoreResult:
+        """Sum the negative log-likelihood of ``text`` under the model.
+
+        The runtime tokenizes ``text`` and scores it in consecutive
+        non-overlapping windows of at most ``max_context_tokens`` targets
+        (each window's last token seeds the next window's context, so every
+        token except the first is scored exactly once). ``max_windows``
+        caps the work for long corpora; ``None`` scores everything.
+        """
         ...
 
     def unload(self) -> None:

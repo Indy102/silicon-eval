@@ -1,4 +1,4 @@
-"""Tests for MLXRuntime with mlx-lm mocked out."""
+"""Tests for MLXRuntime with mlx-lm and mlx.core mocked out."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from silicon_eval.runtimes.base import ModelSpec, Quantization
 from silicon_eval.runtimes.mlx_runtime import MLXRuntime, resolve_model_repo
 
 SPEC = ModelSpec(model_id="mlx-community/TestModel", quantization=Quantization.Q4)
+PEAK_BYTES = 512 * 1024 * 1024
 
 
 @dataclass
@@ -28,7 +29,24 @@ class FakeResponse:
     prompt_tps: float = 200.0
     generation_tokens: int = 3
     generation_tps: float = 40.0
-    peak_memory: float = 0.5  # GB, matching mlx-lm's GenerationResponse
+
+
+class FakeMx:
+    """Stands in for mlx.core; records the memory-API calls MLXRuntime makes."""
+
+    def __init__(self, peak_bytes: int = PEAK_BYTES) -> None:
+        self.peak_bytes = peak_bytes
+        self.reset_calls = 0
+        self.clear_cache_calls = 0
+
+    def reset_peak_memory(self) -> None:
+        self.reset_calls += 1
+
+    def get_peak_memory(self) -> int:
+        return self.peak_bytes
+
+    def clear_cache(self) -> None:
+        self.clear_cache_calls += 1
 
 
 def make_fake_mlx_lm(responses: list[FakeResponse]) -> SimpleNamespace:
@@ -41,11 +59,18 @@ def make_fake_mlx_lm(responses: list[FakeResponse]) -> SimpleNamespace:
     return SimpleNamespace(load=load, stream_generate=stream_generate)
 
 
-@pytest.fixture
-def patched_runtime(monkeypatch: pytest.MonkeyPatch) -> MLXRuntime:
-    fake = make_fake_mlx_lm([FakeResponse("Hello"), FakeResponse(" world")])
+def make_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    responses: list[FakeResponse] | None = None,
+    fake_mx: FakeMx | None = None,
+) -> tuple[MLXRuntime, FakeMx]:
+    if responses is None:
+        responses = [FakeResponse("Hello"), FakeResponse(" world")]
+    mx = fake_mx if fake_mx is not None else FakeMx()
+    fake = make_fake_mlx_lm(responses)
     monkeypatch.setattr(mlx_runtime, "_import_mlx_lm", lambda: fake)
-    return MLXRuntime()
+    monkeypatch.setattr(mlx_runtime, "_import_mx", lambda: mx)
+    return MLXRuntime(), mx
 
 
 class TestResolveModelRepo:
@@ -72,33 +97,54 @@ class TestResolveModelRepo:
 
 class TestMLXRuntime:
     def test_generate_concatenates_stream_and_maps_metrics(
-        self, patched_runtime: MLXRuntime
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        patched_runtime.load(SPEC)
-        result = patched_runtime.generate("hi", max_tokens=8)
+        runtime, _ = make_runtime(monkeypatch)
+        runtime.load(SPEC)
+        result = runtime.generate("hi", max_tokens=8)
 
         assert result.text == "Hello world"
         assert result.metrics.prompt_tokens == 12
         assert result.metrics.generation_tokens == 3
         assert result.metrics.prompt_tps == 200.0
         assert result.metrics.generation_tps == 40.0
-        assert result.metrics.peak_memory_bytes == int(0.5 * 1024**3)
+        assert result.metrics.peak_memory_bytes == PEAK_BYTES  # exact bytes, no unit round-trip
         assert result.metrics.time_to_first_token_s > 0
 
-    def test_generate_before_load_raises(self, patched_runtime: MLXRuntime) -> None:
-        with pytest.raises(InvalidStateError, match="no model loaded"):
-            patched_runtime.generate("hi")
+    def test_load_resets_peak_memory_per_variant(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        runtime, mx = make_runtime(monkeypatch)
+        runtime.load(SPEC)
+        assert mx.reset_calls == 1
+        runtime.load(ModelSpec(model_id="other/Model", quantization=Quantization.Q8))
+        assert mx.reset_calls == 2  # sweep variants cannot inherit earlier peaks
 
-    def test_generate_after_unload_raises(self, patched_runtime: MLXRuntime) -> None:
-        patched_runtime.load(SPEC)
-        patched_runtime.unload()
+    def test_unload_clears_mlx_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        runtime, mx = make_runtime(monkeypatch)
+        runtime.load(SPEC)
+        runtime.unload()
+        assert mx.clear_cache_calls == 1
+
+    def test_zero_peak_memory_reported_as_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        runtime, _ = make_runtime(
+            monkeypatch, responses=[FakeResponse("x")], fake_mx=FakeMx(peak_bytes=0)
+        )
+        runtime.load(SPEC)
+        assert runtime.generate("hi").metrics.peak_memory_bytes is None
+
+    def test_generate_before_load_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        runtime, _ = make_runtime(monkeypatch)
         with pytest.raises(InvalidStateError, match="no model loaded"):
-            patched_runtime.generate("hi")
+            runtime.generate("hi")
+
+    def test_generate_after_unload_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        runtime, _ = make_runtime(monkeypatch)
+        runtime.load(SPEC)
+        runtime.unload()
+        with pytest.raises(InvalidStateError, match="no model loaded"):
+            runtime.generate("hi")
 
     def test_empty_stream_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        fake = make_fake_mlx_lm([])
-        monkeypatch.setattr(mlx_runtime, "_import_mlx_lm", lambda: fake)
-        runtime = MLXRuntime()
+        runtime, _ = make_runtime(monkeypatch, responses=[])
         runtime.load(SPEC)
         with pytest.raises(InvalidStateError, match="no tokens"):
             runtime.generate("hi")
@@ -107,11 +153,12 @@ class TestMLXRuntime:
         def broken_load(repo: str) -> tuple[str, str]:
             raise OSError("repo not found")
 
+        runtime, _ = make_runtime(monkeypatch)
         fake = make_fake_mlx_lm([])
         fake.load = broken_load
         monkeypatch.setattr(mlx_runtime, "_import_mlx_lm", lambda: fake)
         with pytest.raises(ModelLoadError, match="repo not found"):
-            MLXRuntime().load(SPEC)
+            runtime.load(SPEC)
 
     def test_missing_mlx_lm_raises_runtime_unavailable(
         self, monkeypatch: pytest.MonkeyPatch
@@ -119,10 +166,3 @@ class TestMLXRuntime:
         monkeypatch.setitem(sys.modules, "mlx_lm", None)
         with pytest.raises(RuntimeUnavailableError, match="mlx-lm is not installed"):
             MLXRuntime().load(SPEC)
-
-    def test_zero_peak_memory_reported_as_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        fake = make_fake_mlx_lm([FakeResponse("x", peak_memory=0.0)])
-        monkeypatch.setattr(mlx_runtime, "_import_mlx_lm", lambda: fake)
-        runtime = MLXRuntime()
-        runtime.load(SPEC)
-        assert runtime.generate("hi").metrics.peak_memory_bytes is None

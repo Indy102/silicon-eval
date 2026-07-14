@@ -19,6 +19,7 @@ from silicon_eval.runtimes.base import (
     GenerationResult,
     ModelSpec,
     Quantization,
+    ScoreResult,
 )
 
 _QUANT_SUFFIXES: dict[Quantization, str] = {
@@ -26,8 +27,6 @@ _QUANT_SUFFIXES: dict[Quantization, str] = {
     Quantization.Q8: "-8bit",
     Quantization.FP16: "-fp16",
 }
-
-_BYTES_PER_GB = 1024**3
 
 
 def _import_mlx_lm() -> Any:  # untyped third-party module
@@ -38,6 +37,16 @@ def _import_mlx_lm() -> Any:  # untyped third-party module
             "mlx-lm is not installed; install it with: pip install 'silicon-eval[mlx]'"
         ) from exc
     return mlx_lm
+
+
+def _import_mx() -> Any:  # untyped third-party module
+    try:
+        import mlx.core as mx
+    except ImportError as exc:
+        raise RuntimeUnavailableError(
+            "mlx is not installed; install it with: pip install 'silicon-eval[mlx]'"
+        ) from exc
+    return mx
 
 
 def resolve_model_repo(spec: ModelSpec) -> str:
@@ -76,6 +85,9 @@ class MLXRuntime:
     def load(self, spec: ModelSpec) -> None:
         mlx_lm = _import_mlx_lm()
         repo = resolve_model_repo(spec)
+        # Peak memory is a process-lifetime counter; reset it so this variant's
+        # readings can't be contaminated by previously loaded variants.
+        _import_mx().reset_peak_memory()
         try:
             self._model, self._tokenizer = mlx_lm.load(repo)
         except Exception as exc:
@@ -101,22 +113,79 @@ class MLXRuntime:
 
         if last is None:
             raise InvalidStateError("model produced no tokens")
-        return GenerationResult(text="".join(chunks), metrics=_metrics(last, time_to_first_token))
+        # Read the peak directly in bytes rather than round-tripping through
+        # mlx-lm's decimal-GB float; covers everything since this variant's load.
+        peak_bytes = int(_import_mx().get_peak_memory())
+        return GenerationResult(
+            text="".join(chunks),
+            metrics=_metrics(last, time_to_first_token, peak_bytes),
+        )
+
+    def score(
+        self,
+        text: str,
+        *,
+        max_context_tokens: int = 512,
+        max_windows: int | None = None,
+    ) -> ScoreResult:
+        if self._model is None:
+            raise InvalidStateError("no model loaded; call load() first")
+        if max_context_tokens < 1:
+            raise ValueError("max_context_tokens must be >= 1")
+        if max_windows is not None and max_windows < 1:
+            raise ValueError("max_windows must be >= 1, or None to score everything")
+        mx = _import_mx()
+
+        token_ids: list[int] = list(self._tokenizer.encode(text))
+        if len(token_ids) < 2:
+            raise ValueError("text yields fewer than 2 tokens; nothing to score")
+
+        total_nll = 0.0
+        scored = 0
+        windows = 0
+        for start in range(0, len(token_ids) - 1, max_context_tokens):
+            if max_windows is not None and windows >= max_windows:
+                break
+            # Window k predicts tokens[start+1 .. start+W] from tokens[start .. start+W-1];
+            # its last token seeds window k+1, so each token is scored exactly once.
+            window = token_ids[start : start + max_context_tokens + 1]
+            total_nll += self._window_nll(mx, window)
+            scored += len(window) - 1
+            windows += 1
+        return ScoreResult(negative_log_likelihood=total_nll, scored_tokens=scored, windows=windows)
 
     def unload(self) -> None:
         self._model = None
         self._tokenizer = None
         self._spec = None
+        try:
+            mx = _import_mx()
+        except RuntimeUnavailableError:
+            return
+        # Dropping references returns buffers to MLX's cache, not to the OS;
+        # without this, a multi-variant sweep accumulates cached Metal memory.
+        mx.clear_cache()
+
+    def _window_nll(self, mx: Any, window: list[int]) -> float:
+        inputs = mx.array(window[:-1])[None]
+        targets = mx.array(window[1:])
+        logits = self._model(inputs)[0].astype(mx.float32)
+        logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
+        token_logprobs = mx.take_along_axis(logprobs, targets[:, None], axis=-1)
+        nll = -token_logprobs.sum()
+        mx.eval(nll)
+        return float(nll)
 
 
-def _metrics(response: Any, time_to_first_token: float) -> GenerationMetrics:
+def _metrics(
+    response: Any, time_to_first_token: float, peak_memory_bytes: int
+) -> GenerationMetrics:
     """Build metrics from the final mlx-lm ``GenerationResponse`` of a stream."""
-    peak_gb = float(getattr(response, "peak_memory", 0.0))
     return GenerationMetrics(
         prompt_tokens=int(response.prompt_tokens),
         generation_tokens=int(response.generation_tokens),
         time_to_first_token_s=time_to_first_token,
         prompt_tps=float(response.prompt_tps),
         generation_tps=float(response.generation_tps),
-        peak_memory_bytes=int(peak_gb * _BYTES_PER_GB) if peak_gb > 0 else None,
+        peak_memory_bytes=peak_memory_bytes if peak_memory_bytes > 0 else None,
     )
