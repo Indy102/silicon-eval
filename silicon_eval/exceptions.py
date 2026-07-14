@@ -13,5 +13,9 @@ class ModelLoadError(SiliconEvalError):
     """A model could not be downloaded or loaded into the runtime."""
 
 
+class DatasetLoadError(SiliconEvalError):
+    """An eval corpus could not be downloaded or read."""
+
+
 class InvalidStateError(SiliconEvalError):
     """An operation was called in the wrong order, e.g. generate() before load()."""
