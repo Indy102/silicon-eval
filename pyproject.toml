@@ -24,6 +24,9 @@ classifiers = [
 ]
 dependencies = [
     "typer>=0.12",
+    "psutil>=5.9",
+    "huggingface_hub>=0.23",
+    "pyarrow>=15",
 ]
 
 [project.optional-dependencies]
@@ -35,6 +38,8 @@ dev = [
     "mypy>=1.13",
     "pytest>=8.0",
     "pytest-cov>=6.0",
+    "types-psutil",
+    "numpy>=1.26",  # backs the fake mlx.core used in unit tests
 ]
 
 [project.urls]
@@ -69,9 +74,9 @@ select = [
 strict = true
 files = ["silicon_eval", "tests"]
 
-# mlx/mlx-lm ship no type stubs.
+# mlx/mlx-lm/pyarrow ship no type stubs.
 [[tool.mypy.overrides]]
-module = ["mlx", "mlx.*", "mlx_lm", "mlx_lm.*"]
+module = ["mlx", "mlx.*", "mlx_lm", "mlx_lm.*", "pyarrow", "pyarrow.*"]
 ignore_missing_imports = true
 follow_imports = "skip"
 
