@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "silicon-eval"
+version = "0.1.0"
+description = "Evaluation and profiling harness for LLMs on Apple Silicon"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Inderdeep Singh", email = "inder9457@gmail.com" }]
+keywords = ["mlx", "llm", "benchmark", "quantization", "apple-silicon", "profiling"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+dependencies = [
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+mlx = [
+    "mlx-lm>=0.20",
+]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pytest>=8.0",
+    "pytest-cov>=6.0",
+]
+
+[project.urls]
+Repository = "https://github.com/indysingh/silicon-eval"
+
+[project.scripts]
+silicon-eval = "silicon_eval.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["silicon_eval"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+
+# python_version is intentionally unpinned: it tracks the running interpreter,
+# so each CI matrix leg (3.11–3.13) typechecks with its own semantics.
+[tool.mypy]
+strict = true
+files = ["silicon_eval", "tests"]
+
+# mlx/mlx-lm ship no type stubs.
+[[tool.mypy.overrides]]
+module = ["mlx", "mlx.*", "mlx_lm", "mlx_lm.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not slow' --cov=silicon_eval --cov-report=term-missing --cov-fail-under=80"
+markers = [
+    "slow: integration tests that download and run a real model (Apple Silicon only; run with `pytest -m slow --no-cov`)",
+]
