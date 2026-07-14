@@ -4,11 +4,11 @@ Evaluation and profiling harness for LLMs on Apple Silicon. Measure the
 quality / performance / efficiency tradeoffs of quantized models across
 runtimes, and decide what to ship on-device with numbers instead of vibes.
 
-> **Status: v0.1 — Phase 1 of 4.** Runtime abstraction, MLX generation with
-> metrics, and the CLI skeleton are in place. Quality evals (perplexity,
-> task benchmarks), energy sampling, reports, and result caching land in the
-> next phases. Real benchmark numbers will appear here once the measurement
-> pipeline is complete.
+> **Status: v0.2 — Phase 2 of 4.** Runtime abstraction, MLX generation,
+> perplexity on WikiText-2, latency + memory profiling, and JSON reports are
+> in place. Task benchmarks, energy sampling, Markdown reports, and result
+> caching land in the next phases. Real benchmark numbers will appear here
+> once the measurement pipeline is complete.
 
 ## Why
 
@@ -29,23 +29,53 @@ pip install "silicon-eval[mlx] @ git+https://github.com/indysingh/silicon-eval"
 ## Quickstart
 
 ```sh
-silicon-eval run --model mlx-community/Qwen2.5-0.5B-Instruct --quant 4bit,8bit
+silicon-eval run --model mlx-community/Qwen2.5-0.5B-Instruct --quant 4bit,8bit -o report.json
 ```
+
+Each variant gets generation profiling (time-to-first-token, prompt and
+generation tok/s over repeated runs, peak memory) and perplexity on
+WikiText-2, printed as a table and written as structured JSON with machine
+context. Useful knobs:
+
+- `--ppl-windows N` — how many 512-token windows of WikiText-2 to score
+  (default 50 ≈ 25k tokens; `0` = full corpus). Scored token counts are
+  recorded in the report, and all variants score the identical prefix. See
+  [docs/adr/002](docs/adr/002-perplexity-methodology.md) for the methodology.
+- `--runs / --warmup` — measured and unmeasured generation repetitions.
+- `--no-perplexity` — profiling only.
 
 Model ids follow mlx-community naming: pass the base id and silicon-eval
 appends `-4bit` / `-8bit` / `-fp16` per quantization level, or pass the exact
 repo id for a single level.
 
+What the numbers mean:
+
+- **ppl** — perplexity over a fixed WikiText-2 prefix; comparable across the
+  variants in one report, not to published sliding-window results.
+- **ttft / gen t/s** — steady-state stats over `--runs` generations, after
+  `--warmup` unmeasured runs absorb kernel-compilation cost.
+- **peak metal** — accelerator-side peak unified memory since the variant's
+  model load (weights + KV cache + activations). This is the number that
+  matters for "will it fit".
+- **peak rss** — host-side process RSS. On macOS, Metal-backed model memory
+  largely does **not** appear here; treat it as Python/tokenizer overhead,
+  not total footprint.
+
 As a library:
 
 ```python
+from silicon_eval.evals import PerplexityConfig, PerplexityEvaluator
+from silicon_eval.runner import build_report, run_variant
 from silicon_eval.runtimes import get_runtime
 from silicon_eval.runtimes.base import ModelSpec, Quantization
 
-runtime = get_runtime("mlx")
-runtime.load(ModelSpec("mlx-community/Qwen2.5-0.5B-Instruct", Quantization.Q4))
-result = runtime.generate("Explain KV caching in one sentence.", max_tokens=64)
-print(result.metrics.generation_tps, "tok/s")
+variant = run_variant(
+    get_runtime("mlx"),
+    ModelSpec("mlx-community/Qwen2.5-0.5B-Instruct", Quantization.Q4),
+    prompt="Explain KV caching in one sentence.",
+    evaluators=[PerplexityEvaluator(PerplexityConfig(max_windows=50))],
+)
+print(variant.generation.generation_tps.mean, "tok/s")
 ```
 
 ## Architecture
@@ -53,10 +83,11 @@ print(result.metrics.generation_tps, "tok/s")
 ```
 silicon_eval/
   runtimes/        # Runtime protocol + MLXRuntime (llama.cpp planned)
-  evals/           # (Phase 2/3) perplexity, task benchmarks
-  profiling/       # (Phase 2/3) latency, memory, energy samplers
-  report/          # (Phase 2/3) JSON schema + Markdown renderer
+  evals/           # perplexity on WikiText-2; task benchmarks in Phase 3
+  profiling/       # generation latency stats, RSS sampling; energy in Phase 3
+  report/          # JSON schema + machine info; Markdown renderer in Phase 3
   cache/           # (Phase 3) content-addressed result cache
+  runner.py        # per-variant orchestration: load → profile → evaluate
   cli.py           # Typer CLI
 ```
 
