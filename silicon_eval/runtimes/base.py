@@ -102,6 +102,22 @@ class Runtime(Protocol):
         """
         ...
 
+    def score_completion(
+        self,
+        context: str,
+        continuation: str,
+        *,
+        max_context_tokens: int = 2048,
+    ) -> ScoreResult:
+        """NLL of ``continuation`` conditioned on ``context`` (one forward pass).
+
+        Continuation length is measured as ``len(tokens(context + continuation))
+        - len(tokens(context))`` so tokenizer merges at the boundary are handled.
+        If the combined sequence exceeds ``max_context_tokens``, context is
+        truncated from the left; the continuation is always fully scored.
+        """
+        ...
+
     def unload(self) -> None:
         """Release the loaded model's memory."""
         ...

@@ -75,6 +75,16 @@ class FixedTokenizer:
         return self._tokens
 
 
+class MappingTokenizer:
+    """Maps exact strings to token id lists — models tokenizer boundary effects."""
+
+    def __init__(self, mapping: dict[str, list[int]]) -> None:
+        self._mapping = mapping
+
+    def encode(self, text: str) -> list[int]:
+        return self._mapping[text]
+
+
 def make_runtime(
     monkeypatch: pytest.MonkeyPatch, tokens: list[int], model: Any = None
 ) -> MLXRuntime:
@@ -135,6 +145,69 @@ def test_zero_max_windows_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     runtime = make_runtime(monkeypatch, tokens=[1, 2, 3])
     with pytest.raises(ValueError, match="max_windows"):
         runtime.score("text", max_windows=0)
+
+
+def make_completion_runtime(
+    monkeypatch: pytest.MonkeyPatch, mapping: dict[str, list[int]], model: Any = None
+) -> MLXRuntime:
+    loaded_model = model if model is not None else UniformLogitsModel()
+    fake_mlx_lm = SimpleNamespace(load=lambda repo: (loaded_model, MappingTokenizer(mapping)))
+    monkeypatch.setattr(mlx_runtime, "_import_mlx_lm", lambda: fake_mlx_lm)
+    monkeypatch.setattr(mlx_runtime, "_import_mx", lambda: FAKE_MX)
+    runtime = MLXRuntime()
+    runtime.load(SPEC)
+    return runtime
+
+
+class TestScoreCompletion:
+    def test_scores_only_continuation_tokens(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        runtime = make_completion_runtime(
+            monkeypatch, {"ctx": [1, 2, 3], "ctxcont": [1, 2, 3, 4, 5]}
+        )
+        result = runtime.score_completion("ctx", "cont")
+        assert result.scored_tokens == 2
+        assert result.windows == 1
+        assert result.negative_log_likelihood == pytest.approx(2 * math.log(VOCAB), rel=1e-5)
+
+    def test_alignment_via_oracle(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Consecutive ids: the oracle puts ~all mass on (token + 1) % VOCAB, so a
+        # correctly aligned conditional score of the last 2 tokens is ~0 NLL.
+        runtime = make_completion_runtime(
+            monkeypatch,
+            {"ctx": [0, 1, 2, 3, 4], "ctxcont": [0, 1, 2, 3, 4, 5, 6]},
+            model=NextTokenOracleModel(),
+        )
+        result = runtime.score_completion("ctx", "cont")
+        assert result.scored_tokens == 2
+        assert result.negative_log_likelihood / result.scored_tokens < 0.01
+
+    def test_boundary_merge_shrinks_continuation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # The tokenizer merges the boundary: full is only 1 token longer than ctx.
+        runtime = make_completion_runtime(monkeypatch, {"ctx": [1, 2, 3], "ctxcont": [1, 2, 6, 5]})
+        result = runtime.score_completion("ctx", "cont")
+        assert result.scored_tokens == 1
+
+    def test_long_context_left_truncated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        runtime = make_completion_runtime(
+            monkeypatch, {"ctx": [1, 2, 3, 4, 5, 6], "ctxcont": [1, 2, 3, 4, 5, 6, 0, 1]}
+        )
+        result = runtime.score_completion("ctx", "cont", max_context_tokens=4)
+        assert result.scored_tokens == 2  # continuation fully scored despite truncation
+        assert result.negative_log_likelihood == pytest.approx(2 * math.log(VOCAB), rel=1e-5)
+
+    def test_empty_continuation_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        runtime = make_completion_runtime(monkeypatch, {"ctx": [1, 2, 3], "ctxcont": [1, 2, 3]})
+        with pytest.raises(ValueError, match="adds no tokens"):
+            runtime.score_completion("ctx", "cont")
+
+    def test_oversized_continuation_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        runtime = make_completion_runtime(monkeypatch, {"ctx": [1], "ctxcont": [1, 2, 3, 4, 5]})
+        with pytest.raises(ValueError, match="does not fit"):
+            runtime.score_completion("ctx", "cont", max_context_tokens=4)
+
+    def test_before_load_raises(self) -> None:
+        with pytest.raises(InvalidStateError, match="no model loaded"):
+            MLXRuntime().score_completion("ctx", "cont")
 
 
 def test_score_before_load_raises() -> None:

@@ -34,6 +34,8 @@ class FakeRuntime:
         self.prompts: list[str] = []
         self.scored_texts: list[str] = []
         self.score_args: list[tuple[int, int | None]] = []
+        self.completion_calls: list[tuple[str, str, int]] = []
+        self.completion_nlls: dict[str, float] = {}
         self.unload_count = 0
         self.score_result = CANNED_SCORE
 
@@ -55,8 +57,35 @@ class FakeRuntime:
         self.score_args.append((max_context_tokens, max_windows))
         return self.score_result
 
+    def score_completion(
+        self,
+        context: str,
+        continuation: str,
+        *,
+        max_context_tokens: int = 2048,
+    ) -> ScoreResult:
+        self.completion_calls.append((context, continuation, max_context_tokens))
+        nll = self.completion_nlls.get(continuation, 3.0)
+        return ScoreResult(negative_log_likelihood=nll, scored_tokens=2, windows=1)
+
     def unload(self) -> None:
         self.unload_count += 1
+
+
+class UnavailableEnergySampler:
+    """Stands in for PowerMetricsSampler on machines without sudo."""
+
+    available = False
+    unavailable_reason = "powermetrics requires passwordless sudo (fake)"
+
+    def __enter__(self) -> UnavailableEnergySampler:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def reading(self) -> None:
+        return None
 
 
 @pytest.fixture

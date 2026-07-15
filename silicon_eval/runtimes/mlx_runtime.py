@@ -149,10 +149,45 @@ class MLXRuntime:
             # Window k predicts tokens[start+1 .. start+W] from tokens[start .. start+W-1];
             # its last token seeds window k+1, so each token is scored exactly once.
             window = token_ids[start : start + max_context_tokens + 1]
-            total_nll += self._window_nll(mx, window)
+            window_nll = -self._token_logprobs(mx, window).sum()
+            mx.eval(window_nll)
+            total_nll += float(window_nll)
             scored += len(window) - 1
             windows += 1
         return ScoreResult(negative_log_likelihood=total_nll, scored_tokens=scored, windows=windows)
+
+    def score_completion(
+        self,
+        context: str,
+        continuation: str,
+        *,
+        max_context_tokens: int = 2048,
+    ) -> ScoreResult:
+        if self._model is None:
+            raise InvalidStateError("no model loaded; call load() first")
+        mx = _import_mx()
+
+        context_ids = list(self._tokenizer.encode(context))
+        full_ids = list(self._tokenizer.encode(context + continuation))
+        n_continuation = len(full_ids) - len(context_ids)
+        if n_continuation < 1:
+            raise ValueError("continuation adds no tokens to the context")
+        if n_continuation + 1 > max_context_tokens:
+            raise ValueError(
+                f"continuation ({n_continuation} tokens) does not fit in "
+                f"max_context_tokens={max_context_tokens}"
+            )
+        # Left-truncate long contexts; the continuation is always fully scored.
+        full_ids = full_ids[-max_context_tokens:]
+
+        token_logprobs = self._token_logprobs(mx, full_ids)
+        continuation_nll = -token_logprobs[-n_continuation:].sum()
+        mx.eval(continuation_nll)
+        return ScoreResult(
+            negative_log_likelihood=float(continuation_nll),
+            scored_tokens=n_continuation,
+            windows=1,
+        )
 
     def unload(self) -> None:
         self._model = None
@@ -166,15 +201,13 @@ class MLXRuntime:
         # without this, a multi-variant sweep accumulates cached Metal memory.
         mx.clear_cache()
 
-    def _window_nll(self, mx: Any, window: list[int]) -> float:
-        inputs = mx.array(window[:-1])[None]
-        targets = mx.array(window[1:])
+    def _token_logprobs(self, mx: Any, token_ids: list[int]) -> Any:
+        """Per-token logprobs of ``token_ids[1:]`` given their prefixes; shape [T-1, 1]."""
+        inputs = mx.array(token_ids[:-1])[None]
+        targets = mx.array(token_ids[1:])
         logits = self._model(inputs)[0].astype(mx.float32)
         logprobs = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
-        token_logprobs = mx.take_along_axis(logprobs, targets[:, None], axis=-1)
-        nll = -token_logprobs.sum()
-        mx.eval(nll)
-        return float(nll)
+        return mx.take_along_axis(logprobs, targets[:, None], axis=-1)
 
 
 def _metrics(
