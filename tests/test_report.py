@@ -29,7 +29,7 @@ def test_json_round_trip(fake_runtime: FakeRuntime) -> None:
     data, text = make_report(fake_runtime)
 
     assert text.endswith("\n")
-    assert data["schema_version"] == 1
+    assert data["schema_version"] == 2
     variant = data["variants"][0]
     assert variant["quantization"] == "4bit"  # StrEnum serializes as its value
     assert variant["runtime"] == "fake"
