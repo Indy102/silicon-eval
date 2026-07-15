@@ -36,4 +36,4 @@ def test_fake_runtime_satisfies_protocol(fake_runtime: FakeRuntime) -> None:
 
 
 def test_quantization_values_are_cli_names() -> None:
-    assert [q.value for q in Quantization] == ["4bit", "8bit", "fp16"]
+    assert [q.value for q in Quantization] == ["4bit", "8bit", "fp16", "bf16"]

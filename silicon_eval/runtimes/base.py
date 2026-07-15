@@ -13,11 +13,17 @@ from typing import Protocol, runtime_checkable
 
 
 class Quantization(StrEnum):
-    """Quantization levels a model variant can be evaluated at."""
+    """Quantization levels a model variant can be evaluated at.
+
+    ``fp16`` and ``bf16`` are distinct half-precision formats; mlx-community
+    publishes one or the other depending on the model — pick the one that
+    exists for yours.
+    """
 
     Q4 = "4bit"
     Q8 = "8bit"
     FP16 = "fp16"
+    BF16 = "bf16"
 
 
 @dataclass(frozen=True, slots=True)

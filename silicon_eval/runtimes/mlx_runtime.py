@@ -6,6 +6,7 @@ machines without Apple Silicon — e.g. Linux CI runners.
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -26,6 +27,7 @@ _QUANT_SUFFIXES: dict[Quantization, str] = {
     Quantization.Q4: "-4bit",
     Quantization.Q8: "-8bit",
     Quantization.FP16: "-fp16",
+    Quantization.BF16: "-bf16",
 }
 
 
@@ -53,9 +55,9 @@ def resolve_model_repo(spec: ModelSpec) -> str:
     """Map a model spec to a Hugging Face repo id using mlx-community naming.
 
     ``mlx-community`` publishes one repo per quantization, suffixed with
-    ``-4bit``/``-8bit``/``-fp16``. A ``model_id`` already carrying the matching
-    suffix is used verbatim; a mismatched suffix is an error rather than a
-    silently wrong download.
+    ``-4bit``/``-8bit``/``-fp16``/``-bf16``. A ``model_id`` already carrying
+    the matching suffix is used verbatim; a mismatched suffix is an error
+    rather than a silently wrong download.
     """
     if spec.repo_override is not None:
         return spec.repo_override
@@ -136,7 +138,7 @@ class MLXRuntime:
             raise ValueError("max_windows must be >= 1, or None to score everything")
         mx = _import_mx()
 
-        token_ids: list[int] = list(self._tokenizer.encode(text))
+        token_ids = self._encode(text)
         if len(token_ids) < 2:
             raise ValueError("text yields fewer than 2 tokens; nothing to score")
 
@@ -167,8 +169,8 @@ class MLXRuntime:
             raise InvalidStateError("no model loaded; call load() first")
         mx = _import_mx()
 
-        context_ids = list(self._tokenizer.encode(context))
-        full_ids = list(self._tokenizer.encode(context + continuation))
+        context_ids = self._encode(context)
+        full_ids = self._encode(context + continuation)
         n_continuation = len(full_ids) - len(context_ids)
         if n_continuation < 1:
             raise ValueError("continuation adds no tokens to the context")
@@ -200,6 +202,20 @@ class MLXRuntime:
         # Dropping references returns buffers to MLX's cache, not to the OS;
         # without this, a multi-variant sweep accumulates cached Metal memory.
         mx.clear_cache()
+
+    def _encode(self, text: str) -> list[int]:
+        """Tokenize without transformers' sequence-length warning.
+
+        That warning assumes the sequence reaches the model whole; scoring
+        windows it first, so corpus-length inputs are fine here.
+        """
+        logger = logging.getLogger("transformers.tokenization_utils_base")
+        original_level = logger.level
+        logger.setLevel(logging.ERROR)
+        try:
+            return list(self._tokenizer.encode(text))
+        finally:
+            logger.setLevel(original_level)
 
     def _token_logprobs(self, mx: Any, token_ids: list[int]) -> Any:
         """Per-token logprobs of ``token_ids[1:]`` given their prefixes; shape [T-1, 1]."""

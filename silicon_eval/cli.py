@@ -47,7 +47,7 @@ def main(
 def run(
     model: Annotated[str, typer.Option("--model", "-m", help="Model id, e.g. mlx-community/…")],
     quant: Annotated[
-        str, typer.Option("--quant", "-q", help="Comma-separated levels: 4bit,8bit,fp16")
+        str, typer.Option("--quant", "-q", help="Comma-separated levels: 4bit,8bit,fp16,bf16")
     ] = "4bit",
     runtime: Annotated[str, typer.Option("--runtime", "-r", help="Inference backend")] = "mlx",
     prompt: Annotated[
