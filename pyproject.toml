@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "silicon-eval"
-version = "0.3.0"
+dynamic = ["version"]  # single-sourced from silicon_eval/__init__.py
 description = "Evaluation and profiling harness for LLMs on Apple Silicon"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,7 +25,8 @@ classifiers = [
 dependencies = [
     "typer>=0.12",
     "psutil>=5.9",
-    "huggingface_hub>=0.23",
+    # >=0.25: EntryNotFoundError moved to huggingface_hub.errors in 0.25
+    "huggingface_hub>=0.25",
     "pyarrow>=15",
 ]
 
@@ -42,11 +43,11 @@ dev = [
     "numpy>=1.26",  # backs the fake mlx.core used in unit tests
 ]
 
-[project.urls]
-Repository = "https://github.com/indysingh/silicon-eval"
-
 [project.scripts]
 silicon-eval = "silicon_eval.cli:app"
+
+[tool.hatch.version]
+path = "silicon_eval/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["silicon_eval"]
