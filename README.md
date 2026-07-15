@@ -42,15 +42,15 @@ The table is the pitch: on this model, **8-bit matches bf16 quality (ppl
 trades ~4 perplexity points for 3× bf16's speed at a third of the memory.
 (At 100 items the HellaSwag differences are within sampling noise — the
 perplexity column is the sensitive quality signal here.)
-Raw report: [docs/benchmarks/qwen2.5-0.5b-m1-2026-07-15.json](docs/benchmarks/qwen2.5-0.5b-m1-2026-07-15.json).
+Raw report: [docs/benchmarks/qwen2.5-0.5b-m1-2026-07-15.json](https://github.com/Indy102/silicon-eval/blob/main/docs/benchmarks/qwen2.5-0.5b-m1-2026-07-15.json).
 
 ## Install
 
 Requires Python 3.11+ and an Apple Silicon Mac for actual inference. Until
-the first PyPI release, install from a clone of this repository:
+the first PyPI release, install straight from the repository:
 
 ```sh
-pip install ".[mlx]"
+pip install "silicon-eval[mlx] @ git+https://github.com/Indy102/silicon-eval"
 ```
 
 ## Quickstart
@@ -65,12 +65,13 @@ generation tok/s over repeated runs, peak memory), perplexity on WikiText-2,
 HellaSwag multiple-choice accuracy, and — where available — energy per token,
 printed as a table and written as structured JSON and/or a Markdown
 comparison. Results are cached per config, so re-runs only compute what
-changed ([ADR-003](docs/adr/003-result-cache.md)). Useful knobs:
+changed ([ADR-003](https://github.com/Indy102/silicon-eval/blob/main/docs/adr/003-result-cache.md)). Useful knobs:
 
 - `--ppl-windows N` — how many 512-token windows of WikiText-2 to score
   (default 50 ≈ 25k tokens; `0` = full corpus). Scored token counts are
   recorded in the report, and all variants score the identical prefix. See
-  [docs/adr/002](docs/adr/002-perplexity-methodology.md) for the methodology.
+  [docs/adr/002](https://github.com/Indy102/silicon-eval/blob/main/docs/adr/002-perplexity-methodology.md)
+  for the methodology.
 - `--hs-items N` — HellaSwag validation items (default 100; small-sample
   noise is real, but variants are compared on identical items).
 - `--runs / --warmup` — measured and unmeasured generation repetitions.
@@ -158,7 +159,8 @@ silicon_eval/
 
 The load-bearing decision: evals and profiling depend on a `Runtime`
 *protocol*, never on MLX directly, so new backends drop in without touching
-measurement code. See [docs/adr/001-runtime-abstraction.md](docs/adr/001-runtime-abstraction.md).
+measurement code. See
+[docs/adr/001-runtime-abstraction.md](https://github.com/Indy102/silicon-eval/blob/main/docs/adr/001-runtime-abstraction.md).
 
 ## Development
 

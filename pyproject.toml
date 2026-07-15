@@ -43,6 +43,10 @@ dev = [
     "numpy>=1.26",  # backs the fake mlx.core used in unit tests
 ]
 
+[project.urls]
+Repository = "https://github.com/Indy102/silicon-eval"
+Issues = "https://github.com/Indy102/silicon-eval/issues"
+
 [project.scripts]
 silicon-eval = "silicon_eval.cli:app"
 
