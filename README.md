@@ -4,11 +4,10 @@ Evaluation and profiling harness for LLMs on Apple Silicon. Measure the
 quality / performance / efficiency tradeoffs of quantized models across
 runtimes, and decide what to ship on-device with numbers instead of vibes.
 
-> **Status: v0.3 — Phase 3 of 4.** Runtime abstraction, MLX generation,
-> perplexity on WikiText-2, HellaSwag accuracy, latency + memory profiling,
-> powermetrics energy sampling, JSON + Markdown reports, and a result cache
-> are in place. Remaining: llama.cpp runtime, README benchmark tables from
-> real runs, PyPI packaging polish.
+> **Status: v0.4.** Feature-complete for MLX: perplexity on WikiText-2,
+> HellaSwag accuracy, latency + memory profiling, powermetrics energy
+> sampling, JSON + Markdown reports, and a content-addressed result cache.
+> Next up: a llama.cpp runtime for cross-runtime comparisons.
 
 ## Why
 
@@ -18,12 +17,39 @@ halves your memory but what does it do to MMLU? Is MLX or llama.cpp faster
 for *your* model on *your* chip? silicon-eval runs the matrix and gives you
 one comparison table.
 
-## Install
+## Example results
 
-Requires Python 3.11+ and an Apple Silicon Mac for actual inference.
+Qwen2.5-0.5B-Instruct across quantization levels — one command, one table:
 
 ```sh
-pip install "silicon-eval[mlx] @ git+https://github.com/indysingh/silicon-eval"
+silicon-eval run --model mlx-community/Qwen2.5-0.5B-Instruct --quant 4bit,8bit,bf16 \
+    -o report.json --markdown report.md
+```
+
+| quant | ppl (wikitext2) | hellaswag acc_norm | ttft (s) | gen tok/s | prompt tok/s | peak metal |
+|-------|-----------------|--------------------|----------|-----------|--------------|------------|
+| 4bit  | 21.82           | 0.490              | 0.122    | 139.8     | 334.0        | 287 MB     |
+| 8bit  | 17.87           | 0.480              | 0.144    | 81.4      | 266.1        | 522 MB     |
+| bf16  | 17.89           | 0.470              | 0.178    | 47.9      | 177.7        | 969 MB     |
+
+*Measured 2026-07-15 on an Apple M1 (8 GB unified memory), macOS 26.5,
+Python 3.13.0, mlx 0.32.0, mlx-lm 0.31.3. Perplexity over the first 25,600
+tokens of WikiText-2 (raw, test); HellaSwag over the first 100 validation
+items; latency is the mean of 3 runs of 64 tokens after 1 warmup.*
+
+The table is the pitch: on this model, **8-bit matches bf16 quality (ppl
+17.87 vs 17.89) at 70% higher throughput and half the memory**, while 4-bit
+trades ~4 perplexity points for 3× bf16's speed at a third of the memory.
+(At 100 items the HellaSwag differences are within sampling noise — the
+perplexity column is the sensitive quality signal here.)
+
+## Install
+
+Requires Python 3.11+ and an Apple Silicon Mac for actual inference. Until
+the first PyPI release, install from a clone of this repository:
+
+```sh
+pip install ".[mlx]"
 ```
 
 ## Quickstart
@@ -51,15 +77,22 @@ changed ([ADR-003](docs/adr/003-result-cache.md)). Useful knobs:
 - `--no-cache` — re-measure everything and refresh the cached entries.
 
 Energy sampling uses `powermetrics`, which needs root. Grant passwordless
-sudo for exactly that binary (`<user> ALL=(root) NOPASSWD:
-/usr/bin/powermetrics` via `sudo visudo`) or run silicon-eval with sudo;
-otherwise the run degrades gracefully and reports why. Note a cached variant
-remembers that energy was unavailable — after enabling sudo, re-measure with
-`--no-cache`.
+sudo for both the sampler and the signal used to stop it (via `sudo visudo`):
+
+```
+<user> ALL=(root) NOPASSWD: /usr/bin/powermetrics, /bin/kill
+```
+
+(`/bin/kill` is required too — powermetrics runs as root, so silicon-eval
+stops it through `sudo -n kill`.) Alternatively run silicon-eval itself with
+sudo. Without either, the run degrades gracefully and reports why. Note a
+cached variant remembers that energy was unavailable — after enabling sudo,
+re-measure with `--no-cache`.
 
 Model ids follow mlx-community naming: pass the base id and silicon-eval
-appends `-4bit` / `-8bit` / `-fp16` per quantization level, or pass the exact
-repo id for a single level.
+appends `-4bit` / `-8bit` / `-fp16` / `-bf16` per quantization level, or pass
+the exact repo id for a single level. (fp16 and bf16 are distinct formats —
+check which one mlx-community actually published for your model.)
 
 What the numbers mean:
 
@@ -97,6 +130,19 @@ print(variant.generation.generation_tps.mean, "tok/s")
 ```
 
 ## Architecture
+
+```mermaid
+flowchart LR
+    CLI["cli.py<br/>Typer CLI"] --> CACHE["cache/<br/>content-addressed<br/>result cache"]
+    CLI --> RUNNER["runner.py<br/>load → profile → evaluate"]
+    RUNNER --> PROTO["runtimes/base.py<br/><b>Runtime protocol</b><br/>generate · score · score_completion"]
+    PROTO --> MLX["MLXRuntime<br/>(mlx-lm)"]
+    PROTO -.-> LLAMA["llama.cpp<br/>(planned)"]
+    RUNNER --> EVALS["evals/<br/>perplexity · hellaswag"]
+    RUNNER --> PROF["profiling/<br/>latency · memory · energy"]
+    EVALS --> PROTO
+    RUNNER --> REPORT["report/<br/>JSON · Markdown"]
+```
 
 ```
 silicon_eval/
