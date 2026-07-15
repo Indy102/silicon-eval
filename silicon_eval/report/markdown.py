@@ -8,6 +8,7 @@ from silicon_eval.report.schema import Report, VariantResult
 
 
 def render_markdown(report: Report) -> str:
+    """Report as a Markdown document: context, comparison table, notes."""
     lines = ["# silicon-eval report", ""]
     lines.extend(_context_lines(report))
     lines.append("")
@@ -20,6 +21,7 @@ def render_markdown(report: Report) -> str:
 
 
 def write_report_markdown(report: Report, path: Path) -> None:
+    """Render ``report`` to ``path`` as Markdown."""
     path.write_text(render_markdown(report), encoding="utf-8")
 
 

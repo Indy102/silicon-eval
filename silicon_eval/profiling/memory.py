@@ -54,10 +54,12 @@ class RssSampler:
 
     @property
     def peak_rss_bytes(self) -> int:
+        """Largest RSS observed so far (valid during and after sampling)."""
         return self._peak
 
     @property
     def samples_taken(self) -> int:
+        """Number of RSS samples collected (enter + loop ticks + exit)."""
         return self._samples
 
     def _loop(self) -> None:

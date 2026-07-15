@@ -11,6 +11,7 @@ from silicon_eval.report.schema import MachineInfo
 
 
 def collect_machine_info() -> MachineInfo:
+    """Chip, memory, OS, and Python version of the current machine."""
     return MachineInfo(
         chip=_chip_name(),
         memory_bytes=int(psutil.virtual_memory().total),

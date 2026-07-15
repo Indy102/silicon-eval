@@ -1,9 +1,12 @@
 """Content-addressed result cache.
 
 A cache key is the SHA-256 of the canonical JSON of everything that
-determines a variant's results: model, quantization, runtime, profiling and
-eval configuration, schema version, and the machine (chip + memory). Change
-any input and the key changes, so re-runs only compute what changed.
+determines a variant's results — model, quantization, runtime, profiling and
+eval configuration, machine (chip, memory, OS), and the silicon-eval, schema,
+and backend (mlx/mlx-lm) versions. The CLI assembles the payload
+(``_cache_payload_base``); the full rationale lives in
+docs/adr/003-result-cache.md. Change any input and the key changes, so
+re-runs only compute what changed.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ _ENV_CACHE_DIR = "SILICON_EVAL_CACHE_DIR"
 
 
 def default_cache_dir() -> Path:
+    """Cache root: $SILICON_EVAL_CACHE_DIR or ~/.cache/silicon-eval."""
     override = os.environ.get(_ENV_CACHE_DIR)
     if override:
         return Path(override)
@@ -39,9 +43,11 @@ class ResultCache:
 
     @property
     def root(self) -> Path:
+        """Directory this cache reads and writes."""
         return self._root
 
     def get(self, key: str) -> dict[str, Any] | None:
+        """Stored document for ``key``, or None on miss/corruption."""
         path = self._path(key)
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
@@ -50,6 +56,7 @@ class ResultCache:
         return loaded if isinstance(loaded, dict) else None
 
     def put(self, key: str, value: dict[str, Any]) -> None:
+        """Store ``value`` under ``key`` (atomic tmp-file + rename)."""
         self._root.mkdir(parents=True, exist_ok=True)
         path = self._path(key)
         tmp = path.with_suffix(".tmp")

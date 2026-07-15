@@ -15,20 +15,24 @@ from silicon_eval.runtimes.base import Quantization
 
 
 def report_to_dict(report: Report) -> dict[str, Any]:
+    """Report as JSON-ready nested dicts (dataclasses.asdict)."""
     return dataclasses.asdict(report)
 
 
 def report_to_json(report: Report) -> str:
+    """Report as a pretty-printed strict-JSON string."""
     # allow_nan=False: a NaN/Infinity metric is a measurement bug — fail loudly
     # rather than emit JSON that standard parsers reject.
     return json.dumps(report_to_dict(report), indent=2, allow_nan=False) + "\n"
 
 
 def write_report_json(report: Report, path: Path) -> None:
+    """Serialize ``report`` to ``path`` as JSON."""
     path.write_text(report_to_json(report), encoding="utf-8")
 
 
 def variant_to_dict(variant: VariantResult) -> dict[str, Any]:
+    """Variant as JSON-ready nested dicts (inverse of variant_from_dict)."""
     return dataclasses.asdict(variant)
 
 

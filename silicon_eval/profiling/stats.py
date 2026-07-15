@@ -16,6 +16,7 @@ class Stat:
 
     @classmethod
     def from_samples(cls, samples: Sequence[float]) -> Stat:
+        """Aggregate one or more samples; raises ValueError on empty input."""
         if not samples:
             raise ValueError("no samples to aggregate")
         return cls(mean=sum(samples) / len(samples), min=min(samples), max=max(samples))
