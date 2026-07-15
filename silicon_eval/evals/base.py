@@ -17,6 +17,15 @@ class EvalResult:
     duration_s: float
 
 
+@dataclass(frozen=True, slots=True)
+class MultipleChoiceItem:
+    """One multiple-choice question: pick the most likely continuation."""
+
+    context: str
+    choices: tuple[str, ...]
+    answer_index: int
+
+
 @runtime_checkable
 class Evaluator(Protocol):
     """Quality eval contract: given a loaded runtime, produce metrics."""

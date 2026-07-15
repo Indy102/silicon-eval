@@ -13,6 +13,8 @@ from silicon_eval.exceptions import DatasetLoadError
 _WIKITEXT_REPO = "Salesforce/wikitext"
 _WIKITEXT_SUBSET = "wikitext-2-raw-v1"
 
+_HELLASWAG_REPO = "Rowan/hellaswag"
+
 
 def load_wikitext2_text(split: str = "test") -> str:
     """Load a WikiText-2 (raw) split as one concatenated string.
@@ -61,3 +63,45 @@ def _read_text_column(path: Path) -> str:
     table = pq.read_table(path, columns=["text"])
     rows = cast("list[str]", table.column("text").to_pylist())
     return "".join(rows)
+
+
+def load_hellaswag_records(
+    split: str = "validation", max_items: int | None = None
+) -> list[dict[str, object]]:
+    """Load raw HellaSwag records (activity_label, ctx_a, ctx_b, endings, label).
+
+    Takes the first ``max_items`` rows so every variant in a sweep scores the
+    identical item set. Raises :class:`DatasetLoadError` on failure.
+    """
+    try:
+        local_path = _download_hellaswag_split(split)
+        records = _read_rows(Path(local_path))
+    except DatasetLoadError:
+        raise
+    except Exception as exc:
+        raise DatasetLoadError(f"could not load HellaSwag {split!r} split: {exc}") from exc
+    if max_items is not None:
+        records = records[:max_items]
+    return records
+
+
+def _download_hellaswag_split(split: str) -> str:
+    expected = f"data/{split}-00000-of-00001.parquet"
+    try:
+        return hf_hub_download(_HELLASWAG_REPO, expected, repo_type="dataset")
+    except EntryNotFoundError:
+        return hf_hub_download(_HELLASWAG_REPO, _find_hellaswag_parquet(split), repo_type="dataset")
+
+
+def _find_hellaswag_parquet(split: str) -> str:
+    files = HfApi().list_repo_files(_HELLASWAG_REPO, repo_type="dataset")
+    for name in files:
+        if f"{split}-" in name and name.endswith(".parquet"):
+            return name
+    raise DatasetLoadError(f"no {split!r} parquet found in {_HELLASWAG_REPO}")
+
+
+def _read_rows(path: Path) -> list[dict[str, object]]:
+    import pyarrow.parquet as pq  # deferred: pyarrow import is slow
+
+    return cast("list[dict[str, object]]", pq.read_table(path).to_pylist())

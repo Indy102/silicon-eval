@@ -1,13 +1,18 @@
-"""Quality evaluators: perplexity now, task benchmarks in Phase 3."""
+"""Quality evaluators: perplexity and HellaSwag multiple-choice accuracy."""
 
-from silicon_eval.evals.base import EvalResult, Evaluator
-from silicon_eval.evals.datasets import load_wikitext2_text
+from silicon_eval.evals.base import EvalResult, Evaluator, MultipleChoiceItem
+from silicon_eval.evals.datasets import load_hellaswag_records, load_wikitext2_text
+from silicon_eval.evals.hellaswag import HellaSwagConfig, HellaSwagEvaluator
 from silicon_eval.evals.perplexity import PerplexityConfig, PerplexityEvaluator
 
 __all__ = [
     "EvalResult",
     "Evaluator",
+    "HellaSwagConfig",
+    "HellaSwagEvaluator",
+    "MultipleChoiceItem",
     "PerplexityConfig",
     "PerplexityEvaluator",
+    "load_hellaswag_records",
     "load_wikitext2_text",
 ]

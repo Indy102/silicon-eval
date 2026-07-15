@@ -89,3 +89,80 @@ def test_missing_split_raises_dataset_error(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(datasets, "hf_hub_download", not_found)
     with pytest.raises(DatasetLoadError, match="no 'test' parquet"):
         datasets.load_wikitext2_text()
+
+
+HELLASWAG_EXPECTED = "data/validation-00000-of-00001.parquet"
+
+
+def write_hellaswag_parquet(path: Path, rows: int) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    pq.write_table(
+        pa.table(
+            {
+                "activity_label": [f"Activity {i}" for i in range(rows)],
+                "ctx_a": [f"Context {i}." for i in range(rows)],
+                "ctx_b": ["they" for _ in range(rows)],
+                "endings": [[f"end {i}{j}" for j in range(4)] for i in range(rows)],
+                "label": ["0" for _ in range(rows)],
+            }
+        ),
+        path,
+    )
+
+
+def test_hellaswag_uses_known_name_without_listing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parquet = tmp_path / "validation.parquet"
+    write_hellaswag_parquet(parquet, rows=3)
+
+    def fake_download(repo_id: str, filename: str, *, repo_type: str) -> str:
+        assert repo_id == "Rowan/hellaswag"
+        assert filename == HELLASWAG_EXPECTED
+        return str(parquet)
+
+    monkeypatch.setattr(datasets, "HfApi", ForbiddenApi)
+    monkeypatch.setattr(datasets, "hf_hub_download", fake_download)
+
+    records = datasets.load_hellaswag_records()
+    assert len(records) == 3
+    assert records[0]["activity_label"] == "Activity 0"
+    assert records[0]["endings"] == [f"end 0{j}" for j in range(4)]
+
+
+def test_hellaswag_max_items_truncates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    parquet = tmp_path / "validation.parquet"
+    write_hellaswag_parquet(parquet, rows=5)
+    monkeypatch.setattr(datasets, "hf_hub_download", lambda *a, **kw: str(parquet))
+    assert len(datasets.load_hellaswag_records(max_items=2)) == 2
+
+
+def test_hellaswag_falls_back_to_listing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    parquet = tmp_path / "renamed.parquet"
+    write_hellaswag_parquet(parquet, rows=1)
+    renamed = "data/validation-00000-of-00002.parquet"
+
+    def fake_download(repo_id: str, filename: str, *, repo_type: str) -> str:
+        if filename == HELLASWAG_EXPECTED:
+            raise EntryNotFoundError("gone")
+        assert filename == renamed
+        return str(parquet)
+
+    class FakeApi:
+        def list_repo_files(self, repo_id: str, *, repo_type: str) -> list[str]:
+            return ["data/train-00000-of-00001.parquet", renamed]
+
+    monkeypatch.setattr(datasets, "HfApi", FakeApi)
+    monkeypatch.setattr(datasets, "hf_hub_download", fake_download)
+    assert len(datasets.load_hellaswag_records()) == 1
+
+
+def test_hellaswag_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
+    def offline(repo_id: str, filename: str, *, repo_type: str) -> str:
+        raise ConnectionError("no network")
+
+    monkeypatch.setattr(datasets, "hf_hub_download", offline)
+    with pytest.raises(DatasetLoadError, match="could not load HellaSwag"):
+        datasets.load_hellaswag_records()
