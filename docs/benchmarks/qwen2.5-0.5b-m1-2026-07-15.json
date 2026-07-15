@@ -1,0 +1,172 @@
+{
+  "schema_version": 2,
+  "silicon_eval_version": "0.3.0",
+  "created_at": "2026-07-15T21:28:16+00:00",
+  "machine": {
+    "chip": "Apple M1",
+    "memory_bytes": 8589934592,
+    "os_version": "macOS 26.5",
+    "python_version": "3.13.0"
+  },
+  "variants": [
+    {
+      "model_id": "mlx-community/Qwen2.5-0.5B-Instruct",
+      "quantization": "4bit",
+      "runtime": "mlx",
+      "generation": {
+        "runs": 3,
+        "warmup_runs": 1,
+        "max_tokens": 64,
+        "ttft_s": {
+          "mean": 0.12165516666330707,
+          "min": 0.1193957909999881,
+          "max": 0.12482649998855777
+        },
+        "prompt_tps": {
+          "mean": 334.03296148542364,
+          "min": 332.54396466370565,
+          "max": 335.3040881949085
+        },
+        "generation_tps": {
+          "mean": 139.80167518726873,
+          "min": 139.11903035023593,
+          "max": 140.83056865449956
+        },
+        "peak_metal_bytes": 301028244
+      },
+      "evals": [
+        {
+          "name": "perplexity:wikitext2",
+          "metrics": {
+            "perplexity": 21.816393676952064,
+            "scored_tokens": 25600,
+            "windows": 50
+          },
+          "duration_s": 17.708311999987927
+        },
+        {
+          "name": "hellaswag",
+          "metrics": {
+            "accuracy": 0.41,
+            "accuracy_norm": 0.49,
+            "items": 100
+          },
+          "duration_s": 25.40610670899332
+        }
+      ],
+      "peak_rss_bytes": 767852544,
+      "energy": null,
+      "energy_unavailable_reason": "powermetrics requires passwordless sudo (sudo: a password is required)",
+      "backend_versions": {
+        "mlx": "0.32.0",
+        "mlx-lm": "0.31.3"
+      }
+    },
+    {
+      "model_id": "mlx-community/Qwen2.5-0.5B-Instruct",
+      "quantization": "8bit",
+      "runtime": "mlx",
+      "generation": {
+        "runs": 3,
+        "warmup_runs": 1,
+        "max_tokens": 64,
+        "ttft_s": {
+          "mean": 0.1436113333281052,
+          "min": 0.13764979199913796,
+          "max": 0.15009683299285825
+        },
+        "prompt_tps": {
+          "mean": 266.13436049690387,
+          "min": 252.94722023553123,
+          "max": 284.2000897815493
+        },
+        "generation_tps": {
+          "mean": 81.3575924350075,
+          "min": 74.75144414784036,
+          "max": 84.81776391865492
+        },
+        "peak_metal_bytes": 546933804
+      },
+      "evals": [
+        {
+          "name": "perplexity:wikitext2",
+          "metrics": {
+            "perplexity": 17.86620634057866,
+            "scored_tokens": 25600,
+            "windows": 50
+          },
+          "duration_s": 17.791106417003903
+        },
+        {
+          "name": "hellaswag",
+          "metrics": {
+            "accuracy": 0.41,
+            "accuracy_norm": 0.48,
+            "items": 100
+          },
+          "duration_s": 21.468174374997034
+        }
+      ],
+      "peak_rss_bytes": 1013792768,
+      "energy": null,
+      "energy_unavailable_reason": "powermetrics requires passwordless sudo (sudo: a password is required)",
+      "backend_versions": {
+        "mlx": "0.32.0",
+        "mlx-lm": "0.31.3"
+      }
+    },
+    {
+      "model_id": "mlx-community/Qwen2.5-0.5B-Instruct",
+      "quantization": "bf16",
+      "runtime": "mlx",
+      "generation": {
+        "runs": 3,
+        "warmup_runs": 1,
+        "max_tokens": 64,
+        "ttft_s": {
+          "mean": 0.17781030567130074,
+          "min": 0.17141729200375266,
+          "max": 0.18150150000292342
+        },
+        "prompt_tps": {
+          "mean": 177.671138735981,
+          "min": 173.37236835844396,
+          "max": 181.85512995894837
+        },
+        "generation_tps": {
+          "mean": 47.87267235592369,
+          "min": 47.1607262418405,
+          "max": 48.413150259551195
+        },
+        "peak_metal_bytes": 1016476708
+      },
+      "evals": [
+        {
+          "name": "perplexity:wikitext2",
+          "metrics": {
+            "perplexity": 17.88741746653664,
+            "scored_tokens": 25600,
+            "windows": 50
+          },
+          "duration_s": 19.215809874993283
+        },
+        {
+          "name": "hellaswag",
+          "metrics": {
+            "accuracy": 0.41,
+            "accuracy_norm": 0.47,
+            "items": 100
+          },
+          "duration_s": 43.48699075001059
+        }
+      ],
+      "peak_rss_bytes": 2020835328,
+      "energy": null,
+      "energy_unavailable_reason": "powermetrics requires passwordless sudo (sudo: a password is required)",
+      "backend_versions": {
+        "mlx": "0.32.0",
+        "mlx-lm": "0.31.3"
+      }
+    }
+  ]
+}

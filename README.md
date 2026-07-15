@@ -42,6 +42,7 @@ The table is the pitch: on this model, **8-bit matches bf16 quality (ppl
 trades ~4 perplexity points for 3× bf16's speed at a third of the memory.
 (At 100 items the HellaSwag differences are within sampling noise — the
 perplexity column is the sensitive quality signal here.)
+Raw report: [docs/benchmarks/qwen2.5-0.5b-m1-2026-07-15.json](docs/benchmarks/qwen2.5-0.5b-m1-2026-07-15.json).
 
 ## Install
 
