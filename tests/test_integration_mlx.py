@@ -56,8 +56,36 @@ def test_real_score_gives_sane_perplexity(loaded_runtime: MLXRuntime) -> None:
     assert 1.0 < perplexity < 1000.0  # coherent English on a real LM
 
 
+def test_real_score_completion_prefers_true_continuation(
+    loaded_runtime: MLXRuntime,
+) -> None:
+    context = "The capital of France is"
+    paris = loaded_runtime.score_completion(context, " Paris")
+    zebra = loaded_runtime.score_completion(context, " zebra")
+
+    assert paris.scored_tokens >= 1
+    assert zebra.scored_tokens >= 1
+    paris_nll = paris.negative_log_likelihood / paris.scored_tokens
+    zebra_nll = zebra.negative_log_likelihood / zebra.scored_tokens
+    assert paris_nll < zebra_nll  # a real LM must prefer " Paris" here
+
+
+def test_real_hellaswag_subset(loaded_runtime: MLXRuntime) -> None:
+    from silicon_eval.evals.hellaswag import HellaSwagConfig, HellaSwagEvaluator
+
+    evaluator = HellaSwagEvaluator(HellaSwagConfig(max_items=4))
+    result = evaluator.run(loaded_runtime)
+
+    assert result.metrics["items"] == 4
+    assert 0.0 <= float(result.metrics["accuracy"]) <= 1.0
+    assert 0.0 <= float(result.metrics["accuracy_norm"]) <= 1.0
+
+
 def test_real_pipeline_end_to_end() -> None:
     pytest.importorskip("mlx_lm")
+    from silicon_eval.report.json_io import variant_from_dict, variant_to_dict
+    from silicon_eval.report.markdown import render_markdown
+
     evaluator = PerplexityEvaluator(
         PerplexityConfig(max_context_tokens=64, max_windows=2),
         text_loader=lambda: SAMPLE_TEXT,
@@ -70,6 +98,7 @@ def test_real_pipeline_end_to_end() -> None:
         runs=1,
         warmup=1,
         evaluators=[evaluator],
+        measure_energy=True,
     )
     report = build_report([variant])
 
@@ -80,3 +109,9 @@ def test_real_pipeline_end_to_end() -> None:
     ppl = variant.evals[0].metrics["perplexity"]
     assert isinstance(ppl, float)
     assert 1.0 < ppl < 1000.0
+    # Energy either measured or degraded with a reason — never silently absent.
+    assert (variant.energy is None) == (variant.energy_unavailable_reason is not None)
+
+    markdown = render_markdown(report)
+    assert "| 4bit" in markdown
+    assert variant_from_dict(variant_to_dict(variant)) == variant  # cache round trip
