@@ -164,6 +164,32 @@ class TestPowerMetricsSampler:
         assert reading is not None  # session still parsed after escalated stop
         assert reading.samples == 3
 
+    def test_all_kill_paths_denied_never_hangs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # sudoers rule covers powermetrics but not kill: direct signals raise
+        # PermissionError AND sudo -n kill is denied, so waits keep expiring.
+        class UnkillableProcess(FakeProcess):
+            pid = 4242
+
+            def terminate(self) -> None:
+                raise PermissionError("Operation not permitted")
+
+            def kill(self) -> None:
+                raise PermissionError("Operation not permitted")
+
+            def wait(self, timeout: float | None = None) -> int:
+                raise subprocess.TimeoutExpired(cmd="powermetrics", timeout=timeout or 0)
+
+        monkeypatch.setattr("silicon_eval.profiling.energy.subprocess.run", lambda *a, **kw: None)
+        process = UnkillableProcess(exits_immediately=False)
+        with make_sampler(monkeypatch, process, tmp_path, stdout_text=SAMPLE_OUTPUT) as sampler:
+            assert sampler.available
+        # __exit__ returned instead of blocking forever; samples still parsed.
+        reading = sampler.reading()
+        assert reading is not None
+        assert reading.samples == 3
+
     def test_single_use(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         process = FakeProcess(exits_immediately=True)
         sampler = make_sampler(monkeypatch, process, tmp_path)

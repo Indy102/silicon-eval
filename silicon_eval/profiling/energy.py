@@ -12,6 +12,7 @@ load, not just the model. Keep the machine otherwise idle while sampling.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import subprocess
 import tempfile
@@ -32,6 +33,10 @@ _POWERMETRICS_CMD = [
     "cpu_power",
     "-i",
     "200",
+    # Self-termination backstop (~1 hour): if every kill path is denied, the
+    # root-owned process must not outlive the run indefinitely.
+    "--sample-count",
+    "18000",
 ]
 
 
@@ -112,17 +117,23 @@ class PowerMetricsSampler:
         self._signal_process("TERM")
         try:
             self._process.wait(timeout=10)
+            return
         except subprocess.TimeoutExpired:
             self._signal_process("KILL")
-            self._process.wait()
+        # Both signals can be denied (sudoers rule covers powermetrics but
+        # not kill). Collected samples are still on disk and valid; the
+        # orphan self-terminates via the --sample-count backstop.
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            self._process.wait(timeout=5)
 
     def _signal_process(self, signal_name: str) -> None:
         """Signal powermetrics, escalating through sudo when it runs as root.
 
         The sampled process is root-owned (launched via sudo), so an
         unprivileged SIGTERM raises PermissionError — exactly on the machines
-        where sampling works. sudo -n kill succeeds there by construction:
-        sampling being available means passwordless sudo is configured.
+        where sampling works. ``sudo -n kill`` needs its own sudoers coverage
+        (see the README's rule); if it is denied too, _stop_process gives up
+        after bounded waits and the --sample-count backstop reaps the orphan.
         """
         if self._process is None:
             return
