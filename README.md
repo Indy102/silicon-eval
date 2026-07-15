@@ -4,11 +4,11 @@ Evaluation and profiling harness for LLMs on Apple Silicon. Measure the
 quality / performance / efficiency tradeoffs of quantized models across
 runtimes, and decide what to ship on-device with numbers instead of vibes.
 
-> **Status: v0.2 — Phase 2 of 4.** Runtime abstraction, MLX generation,
-> perplexity on WikiText-2, latency + memory profiling, and JSON reports are
-> in place. Task benchmarks, energy sampling, Markdown reports, and result
-> caching land in the next phases. Real benchmark numbers will appear here
-> once the measurement pipeline is complete.
+> **Status: v0.3 — Phase 3 of 4.** Runtime abstraction, MLX generation,
+> perplexity on WikiText-2, HellaSwag accuracy, latency + memory profiling,
+> powermetrics energy sampling, JSON + Markdown reports, and a result cache
+> are in place. Remaining: llama.cpp runtime, README benchmark tables from
+> real runs, PyPI packaging polish.
 
 ## Why
 
@@ -29,20 +29,33 @@ pip install "silicon-eval[mlx] @ git+https://github.com/indysingh/silicon-eval"
 ## Quickstart
 
 ```sh
-silicon-eval run --model mlx-community/Qwen2.5-0.5B-Instruct --quant 4bit,8bit -o report.json
+silicon-eval run --model mlx-community/Qwen2.5-0.5B-Instruct --quant 4bit,8bit \
+    -o report.json --markdown report.md
 ```
 
 Each variant gets generation profiling (time-to-first-token, prompt and
-generation tok/s over repeated runs, peak memory) and perplexity on
-WikiText-2, printed as a table and written as structured JSON with machine
-context. Useful knobs:
+generation tok/s over repeated runs, peak memory), perplexity on WikiText-2,
+HellaSwag multiple-choice accuracy, and — where available — energy per token,
+printed as a table and written as structured JSON and/or a Markdown
+comparison. Results are cached per config, so re-runs only compute what
+changed ([ADR-003](docs/adr/003-result-cache.md)). Useful knobs:
 
 - `--ppl-windows N` — how many 512-token windows of WikiText-2 to score
   (default 50 ≈ 25k tokens; `0` = full corpus). Scored token counts are
   recorded in the report, and all variants score the identical prefix. See
   [docs/adr/002](docs/adr/002-perplexity-methodology.md) for the methodology.
+- `--hs-items N` — HellaSwag validation items (default 100; small-sample
+  noise is real, but variants are compared on identical items).
 - `--runs / --warmup` — measured and unmeasured generation repetitions.
-- `--no-perplexity` — profiling only.
+- `--no-perplexity / --no-hellaswag / --no-energy` — skip pieces.
+- `--no-cache` — re-measure everything and refresh the cached entries.
+
+Energy sampling uses `powermetrics`, which needs root. Grant passwordless
+sudo for exactly that binary (`<user> ALL=(root) NOPASSWD:
+/usr/bin/powermetrics` via `sudo visudo`) or run silicon-eval with sudo;
+otherwise the run degrades gracefully and reports why. Note a cached variant
+remembers that energy was unavailable — after enabling sudo, re-measure with
+`--no-cache`.
 
 Model ids follow mlx-community naming: pass the base id and silicon-eval
 appends `-4bit` / `-8bit` / `-fp16` per quantization level, or pass the exact
@@ -52,6 +65,8 @@ What the numbers mean:
 
 - **ppl** — perplexity over a fixed WikiText-2 prefix; comparable across the
   variants in one report, not to published sliding-window results.
+- **hswag** — HellaSwag accuracy (length-normalized log-likelihood scoring,
+  lm-eval-style) over the first `--hs-items` validation items.
 - **ttft / gen t/s** — steady-state stats over `--runs` generations, after
   `--warmup` unmeasured runs absorb kernel-compilation cost.
 - **peak metal** — accelerator-side peak unified memory since the variant's
@@ -60,6 +75,9 @@ What the numbers mean:
 - **peak rss** — host-side process RSS. On macOS, Metal-backed model memory
   largely does **not** appear here; treat it as Python/tokenizer overhead,
   not total footprint.
+- **mJ/tok** — system-wide CPU+GPU+ANE energy per generated token over
+  dedicated generation runs; includes machine baseline load, so keep the
+  machine otherwise idle.
 
 As a library:
 
@@ -83,10 +101,10 @@ print(variant.generation.generation_tps.mean, "tok/s")
 ```
 silicon_eval/
   runtimes/        # Runtime protocol + MLXRuntime (llama.cpp planned)
-  evals/           # perplexity on WikiText-2; task benchmarks in Phase 3
-  profiling/       # generation latency stats, RSS sampling; energy in Phase 3
-  report/          # JSON schema + machine info; Markdown renderer in Phase 3
-  cache/           # (Phase 3) content-addressed result cache
+  evals/           # perplexity on WikiText-2, HellaSwag multiple-choice
+  profiling/       # generation latency stats, RSS sampling, powermetrics energy
+  report/          # JSON schema + machine info + Markdown renderer
+  cache/           # content-addressed result cache
   runner.py        # per-variant orchestration: load → profile → evaluate
   cli.py           # Typer CLI
 ```
@@ -110,3 +128,18 @@ pytest -m slow --no-cov                  # integration test: real 0.5B model, Ap
 CI (GitHub Actions) runs lint, typecheck, and unit tests on Linux — the
 runtime layer is mocked there. Integration tests require Apple Silicon and
 run locally only.
+
+Troubleshooting: if `silicon-eval` fails with `ModuleNotFoundError: No module
+named 'silicon_eval'` after an editable install on macOS, check whether the
+OS stamped the install's `.pth` file with the hidden flag — Python 3.13+
+silently skips hidden `.pth` files, and some sandboxed/agentic environments
+re-apply the flag after you clear it:
+
+```sh
+ls -lO .venv/lib/python3.13/site-packages/*.pth   # look for "hidden"
+chflags nohidden .venv/lib/python3.13/site-packages/*.pth
+```
+
+If the flag keeps coming back, either run with the project root on
+`PYTHONPATH` (`PYTHONPATH="$PWD" silicon-eval …`) or use a regular install
+(`pip install .`), which doesn't rely on a `.pth` file.
