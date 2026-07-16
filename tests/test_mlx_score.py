@@ -71,7 +71,8 @@ class FixedTokenizer:
     def __init__(self, tokens: list[int]) -> None:
         self._tokens = tokens
 
-    def encode(self, text: str) -> list[int]:
+    def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
+        assert add_special_tokens is False  # scoring must not add BOS/specials
         return self._tokens
 
 
@@ -81,7 +82,8 @@ class MappingTokenizer:
     def __init__(self, mapping: dict[str, list[int]]) -> None:
         self._mapping = mapping
 
-    def encode(self, text: str) -> list[int]:
+    def encode(self, text: str, add_special_tokens: bool = True) -> list[int]:
+        assert add_special_tokens is False  # scoring must not add BOS/specials
         return self._mapping[text]
 
 
@@ -199,6 +201,26 @@ class TestScoreCompletion:
         runtime = make_completion_runtime(monkeypatch, {"ctx": [1, 2, 3], "ctxcont": [1, 2, 3]})
         with pytest.raises(ValueError, match="adds no tokens"):
             runtime.score_completion("ctx", "cont")
+
+    def test_empty_context_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Zero context tokens would silently drop the first continuation
+        # token from the NLL while still counting it in scored_tokens.
+        runtime = make_completion_runtime(monkeypatch, {"": [], "cont": [4, 5]})
+        with pytest.raises(ValueError, match="context must contribute"):
+            runtime.score_completion("", "cont")
+
+    def test_scores_the_right_span(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Context breaks the oracle's consecutive pattern; only the
+        # continuation follows it. A wrong-span slice ([:n] instead of [-n:])
+        # scores ~25 nats/token here instead of ~0 — kills the slice mutant.
+        runtime = make_completion_runtime(
+            monkeypatch,
+            {"ctx": [5, 0, 3], "ctxcont": [5, 0, 3, 4, 5]},
+            model=NextTokenOracleModel(),
+        )
+        result = runtime.score_completion("ctx", "cont")
+        assert result.scored_tokens == 2
+        assert result.negative_log_likelihood / result.scored_tokens < 0.01
 
     def test_oversized_continuation_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
         runtime = make_completion_runtime(monkeypatch, {"ctx": [1], "ctxcont": [1, 2, 3, 4, 5]})

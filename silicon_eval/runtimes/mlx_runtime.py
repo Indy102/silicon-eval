@@ -21,6 +21,7 @@ from silicon_eval.runtimes.base import (
     ModelSpec,
     Quantization,
     ScoreResult,
+    iter_score_windows,
 )
 
 _QUANT_SUFFIXES: dict[Quantization, str] = {
@@ -132,26 +133,16 @@ class MLXRuntime:
     ) -> ScoreResult:
         if self._model is None:
             raise InvalidStateError("no model loaded; call load() first")
-        if max_context_tokens < 1:
-            raise ValueError("max_context_tokens must be >= 1")
-        if max_windows is not None and max_windows < 1:
-            raise ValueError("max_windows must be >= 1, or None to score everything")
         mx = _import_mx()
 
         token_ids = self._encode(text)
-        if len(token_ids) < 2:
-            raise ValueError("text yields fewer than 2 tokens; nothing to score")
-
         total_nll = 0.0
         scored = 0
         windows = 0
-        for start in range(0, len(token_ids) - 1, max_context_tokens):
-            if max_windows is not None and windows >= max_windows:
-                break
-            # Window k predicts tokens[start+1 .. start+W] from tokens[start .. start+W-1];
-            # its last token seeds window k+1, so each token is scored exactly once.
-            window = token_ids[start : start + max_context_tokens + 1]
-            window_nll = -self._token_logprobs(mx, window).sum()
+        for window in iter_score_windows(
+            token_ids, max_context_tokens=max_context_tokens, max_windows=max_windows
+        ):
+            window_nll = -self._token_logprobs(mx, list(window)).sum()
             mx.eval(window_nll)
             total_nll += float(window_nll)
             scored += len(window) - 1
@@ -174,6 +165,8 @@ class MLXRuntime:
         n_continuation = len(full_ids) - len(context_ids)
         if n_continuation < 1:
             raise ValueError("continuation adds no tokens to the context")
+        if n_continuation >= len(full_ids):
+            raise ValueError("context must contribute at least one token")
         if n_continuation + 1 > max_context_tokens:
             raise ValueError(
                 f"continuation ({n_continuation} tokens) does not fit in "
@@ -204,16 +197,19 @@ class MLXRuntime:
         mx.clear_cache()
 
     def _encode(self, text: str) -> list[int]:
-        """Tokenize without transformers' sequence-length warning.
+        """Tokenize for scoring: raw continuation stream, no BOS/specials.
 
-        That warning assumes the sequence reaches the model whole; scoring
-        windows it first, so corpus-length inputs are fine here.
+        ``add_special_tokens=False`` keeps scoring identical across runtimes
+        (llama.cpp also scores without BOS — ADR-004); BOS-adding tokenizers
+        like Llama's would otherwise shift every window. The logger dance
+        silences transformers' sequence-length warning, which assumes the
+        sequence reaches the model whole — scoring windows it first.
         """
         logger = logging.getLogger("transformers.tokenization_utils_base")
         original_level = logger.level
         logger.setLevel(logging.ERROR)
         try:
-            return list(self._tokenizer.encode(text))
+            return list(self._tokenizer.encode(text, add_special_tokens=False))
         finally:
             logger.setLevel(original_level)
 

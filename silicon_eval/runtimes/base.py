@@ -7,6 +7,7 @@ registering it — nothing upstream changes. See docs/adr/001 for rationale.
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
@@ -32,11 +33,15 @@ class ModelSpec:
 
     ``repo_override`` pins an exact repo id when the runtime's naming
     convention doesn't apply (e.g. a private fork or unusual repo name).
+    ``file_override`` additionally pins a file within the repo for runtimes
+    whose repos hold one artifact per quantization (e.g. GGUF files for
+    llama.cpp); runtimes that load whole repos ignore it.
     """
 
     model_id: str
     quantization: Quantization
     repo_override: str | None = None
+    file_override: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +132,31 @@ class Runtime(Protocol):
     def unload(self) -> None:
         """Release the loaded model's memory."""
         ...
+
+
+def iter_score_windows(
+    token_ids: Sequence[int],
+    *,
+    max_context_tokens: int,
+    max_windows: int | None,
+) -> Iterator[Sequence[int]]:
+    """Yield the consecutive scoring windows ``Runtime.score`` requires.
+
+    Window k covers ``token_ids[k*W : k*W + W + 1]``: it predicts tokens
+    ``k*W+1 .. k*W+W`` from their prefixes, and its last token seeds window
+    k+1's context — so every token except the first is scored exactly once.
+    Shared by runtime implementations so their windowing cannot diverge.
+    """
+    if max_context_tokens < 1:
+        raise ValueError("max_context_tokens must be >= 1")
+    if max_windows is not None and max_windows < 1:
+        raise ValueError("max_windows must be >= 1, or None to score everything")
+    if len(token_ids) < 2:
+        raise ValueError("text yields fewer than 2 tokens; nothing to score")
+    for index, start in enumerate(range(0, len(token_ids) - 1, max_context_tokens)):
+        if max_windows is not None and index >= max_windows:
+            return
+        yield token_ids[start : start + max_context_tokens + 1]
 
 
 def parse_quant_list(raw: str) -> list[Quantization]:
