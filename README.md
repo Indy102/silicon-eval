@@ -74,11 +74,10 @@ Raw reports:
 
 ## Install
 
-Requires Python 3.11+ and an Apple Silicon Mac for actual inference. Until
-the first PyPI release, install straight from the repository:
+Requires Python 3.11+ and an Apple Silicon Mac for actual inference.
 
 ```sh
-pip install "silicon-eval[mlx] @ git+https://github.com/Indy102/silicon-eval"
+pip install "silicon-eval[mlx]"
 ```
 
 Add the `llamacpp` extra for cross-runtime comparisons
