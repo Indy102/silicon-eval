@@ -1,0 +1,117 @@
+{
+  "schema_version": 2,
+  "silicon_eval_version": "0.5.0",
+  "created_at": "2026-07-16T00:48:38+00:00",
+  "machine": {
+    "chip": "Apple M1",
+    "memory_bytes": 8589934592,
+    "os_version": "macOS 26.5",
+    "python_version": "3.13.0"
+  },
+  "variants": [
+    {
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+      "quantization": "4bit",
+      "runtime": "llama.cpp",
+      "generation": {
+        "runs": 3,
+        "warmup_runs": 1,
+        "max_tokens": 64,
+        "ttft_s": {
+          "mean": 0.0346472773332304,
+          "min": 0.03174283300177194,
+          "max": 0.036619207996409386
+        },
+        "prompt_tps": {
+          "mean": 318.695995106442,
+          "min": 300.38880144755126,
+          "max": 346.53491701216336
+        },
+        "generation_tps": {
+          "mean": 77.72136472252436,
+          "min": 75.60565149154856,
+          "max": 78.94383177641474
+        },
+        "peak_metal_bytes": null
+      },
+      "evals": [
+        {
+          "name": "perplexity:wikitext2",
+          "metrics": {
+            "perplexity": 18.86911783588706,
+            "scored_tokens": 25600,
+            "windows": 50
+          },
+          "duration_s": 45.403980415998376
+        },
+        {
+          "name": "hellaswag",
+          "metrics": {
+            "accuracy": 0.43,
+            "accuracy_norm": 0.51,
+            "items": 100
+          },
+          "duration_s": 31.30769458299619
+        }
+      ],
+      "peak_rss_bytes": 3047833600,
+      "energy": null,
+      "energy_unavailable_reason": "powermetrics requires passwordless sudo (sudo: a password is required)",
+      "backend_versions": {
+        "llama-cpp-python": "0.3.34"
+      }
+    },
+    {
+      "model_id": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+      "quantization": "8bit",
+      "runtime": "llama.cpp",
+      "generation": {
+        "runs": 3,
+        "warmup_runs": 1,
+        "max_tokens": 64,
+        "ttft_s": {
+          "mean": 0.029850013330966856,
+          "min": 0.029117040990968235,
+          "max": 0.031071208009961993
+        },
+        "prompt_tps": {
+          "mean": 368.8158966842415,
+          "min": 354.0255015663762,
+          "max": 377.78564117871974
+        },
+        "generation_tps": {
+          "mean": 65.44868565048297,
+          "min": 64.96725727558348,
+          "max": 65.73203709015948
+        },
+        "peak_metal_bytes": null
+      },
+      "evals": [
+        {
+          "name": "perplexity:wikitext2",
+          "metrics": {
+            "perplexity": 18.44360752396965,
+            "scored_tokens": 25600,
+            "windows": 50
+          },
+          "duration_s": 48.99121325000306
+        },
+        {
+          "name": "hellaswag",
+          "metrics": {
+            "accuracy": 0.43,
+            "accuracy_norm": 0.48,
+            "items": 100
+          },
+          "duration_s": 29.25134091700602
+        }
+      ],
+      "peak_rss_bytes": 3271966720,
+      "energy": null,
+      "energy_unavailable_reason": "powermetrics requires passwordless sudo (sudo: a password is required)",
+      "backend_versions": {
+        "llama-cpp-python": "0.3.34"
+      }
+    }
+  ]
+}

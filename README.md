@@ -4,10 +4,10 @@ Evaluation and profiling harness for LLMs on Apple Silicon. Measure the
 quality / performance / efficiency tradeoffs of quantized models across
 runtimes, and decide what to ship on-device with numbers instead of vibes.
 
-> **Status: v0.4.** Feature-complete for MLX: perplexity on WikiText-2,
-> HellaSwag accuracy, latency + memory profiling, powermetrics energy
-> sampling, JSON + Markdown reports, and a content-addressed result cache.
-> Next up: a llama.cpp runtime for cross-runtime comparisons.
+> **Status: v0.5.** Two runtimes — MLX and llama.cpp — behind one protocol:
+> perplexity on WikiText-2, HellaSwag accuracy, latency + memory profiling,
+> powermetrics energy sampling, JSON + Markdown reports, and a
+> content-addressed result cache.
 
 ## Why
 
@@ -42,7 +42,33 @@ The table is the pitch: on this model, **8-bit matches bf16 quality (ppl
 trades ~4 perplexity points for 3× bf16's speed at a third of the memory.
 (At 100 items the HellaSwag differences are within sampling noise — the
 perplexity column is the sensitive quality signal here.)
-Raw report: [docs/benchmarks/qwen2.5-0.5b-m1-2026-07-15.json](https://github.com/Indy102/silicon-eval/blob/main/docs/benchmarks/qwen2.5-0.5b-m1-2026-07-15.json).
+
+And across runtimes — the same base model through MLX and llama.cpp:
+
+| runtime   | quant | ppl (wikitext2) | ttft (s) | gen tok/s | prompt tok/s |
+|-----------|-------|-----------------|----------|-----------|--------------|
+| mlx       | 4bit  | 21.82           | 0.122    | 139.8     | 334.0        |
+| llama.cpp | 4bit  | 18.87           | 0.035    | 77.7      | 318.7        |
+| mlx       | 8bit  | 17.87           | 0.144    | 81.4      | 266.1        |
+| llama.cpp | 8bit  | 18.44           | 0.030    | 65.4      | 368.8        |
+
+The 8-bit rows agreeing within half a perplexity point is the pipeline
+cross-validating itself. The 4-bit rows are the interesting decision:
+**llama.cpp's Q4_K_M keeps near-8-bit quality (18.87) where MLX's 4-bit
+costs ~4 points (21.82) — but MLX generates ~80% faster.** Which one ships
+depends on whether your workload is quality- or throughput-bound; the
+quantization *schemes* differ at the same nominal width, and timing is
+measured differently per runtime — see
+[ADR-004](https://github.com/Indy102/silicon-eval/blob/main/docs/adr/004-cross-runtime-comparability.md).
+(An earlier draft of this table showed llama.cpp TTFT of 0.014 s — a KV
+prefix-cache artifact, since fixed by resetting the cache per measured run.
+The kind of bug this project exists to catch.)
+
+Raw reports:
+[MLX](https://github.com/Indy102/silicon-eval/blob/main/docs/benchmarks/qwen2.5-0.5b-m1-2026-07-15.json)
+(measured 2026-07-15) ·
+[llama.cpp](https://github.com/Indy102/silicon-eval/blob/main/docs/benchmarks/qwen2.5-0.5b-llamacpp-m1-2026-07-16.json)
+(measured 2026-07-16 UTC, llama-cpp-python 0.3.34, same machine and eval budgets).
 
 ## Install
 
@@ -52,6 +78,10 @@ the first PyPI release, install straight from the repository:
 ```sh
 pip install "silicon-eval[mlx] @ git+https://github.com/Indy102/silicon-eval"
 ```
+
+Add the `llamacpp` extra for cross-runtime comparisons
+(`silicon-eval[mlx,llamacpp]`) — note llama-cpp-python compiles from source
+on first install.
 
 ## Quickstart
 
@@ -96,6 +126,18 @@ appends `-4bit` / `-8bit` / `-fp16` / `-bf16` per quantization level, or pass
 the exact repo id for a single level. (fp16 and bf16 are distinct formats —
 check which one mlx-community actually published for your model.)
 
+For llama.cpp, pass a GGUF repository instead and pick the runtime:
+
+```sh
+silicon-eval run --runtime llama.cpp --model Qwen/Qwen2.5-0.5B-Instruct-GGUF \
+    --quant 4bit,8bit -o llamacpp.json
+```
+
+silicon-eval matches the repo's `.gguf` files against the level (`4bit` →
+`Q4_K_M`, then `Q4_0`; `8bit` → `Q8_0`; …). Cross-runtime rows compare what
+each runtime ships at a level — the quantization *schemes* differ; see
+[ADR-004](https://github.com/Indy102/silicon-eval/blob/main/docs/adr/004-cross-runtime-comparability.md).
+
 What the numbers mean:
 
 - **ppl** — perplexity over a fixed WikiText-2 prefix; comparable across the
@@ -105,11 +147,14 @@ What the numbers mean:
 - **ttft / gen t/s** — steady-state stats over `--runs` generations, after
   `--warmup` unmeasured runs absorb kernel-compilation cost.
 - **peak metal** — accelerator-side peak unified memory since the variant's
-  model load (weights + KV cache + activations). This is the number that
-  matters for "will it fit".
-- **peak rss** — host-side process RSS. On macOS, Metal-backed model memory
-  largely does **not** appear here; treat it as Python/tokenizer overhead,
-  not total footprint.
+  model load (weights + KV cache + activations). This is the "will it fit"
+  number for MLX rows; llama.cpp exposes no equivalent, so its rows show n/a
+  and RSS is the closest available footprint there.
+- **peak rss** — host-side process RSS, and its meaning flips per runtime:
+  for MLX, Metal-backed model memory largely does **not** appear here (treat
+  it as Python/tokenizer overhead); for llama.cpp, RSS **includes** the
+  mapped model weights and the scoring logits buffer, so it approximates the
+  real footprint.
 - **mJ/tok** — system-wide CPU+GPU+ANE energy per generated token over
   dedicated generation runs; includes machine baseline load, so keep the
   machine otherwise idle.
@@ -139,7 +184,7 @@ flowchart LR
     CLI --> RUNNER["runner.py<br/>load → profile → evaluate"]
     RUNNER --> PROTO["runtimes/base.py<br/><b>Runtime protocol</b><br/>generate · score · score_completion"]
     PROTO --> MLX["MLXRuntime<br/>(mlx-lm)"]
-    PROTO -.-> LLAMA["llama.cpp<br/>(planned)"]
+    PROTO --> LLAMA["LlamaCppRuntime<br/>(llama-cpp-python, GGUF)"]
     RUNNER --> EVALS["evals/<br/>perplexity · hellaswag"]
     RUNNER --> PROF["profiling/<br/>latency · memory · energy"]
     EVALS --> PROTO
@@ -148,7 +193,7 @@ flowchart LR
 
 ```
 silicon_eval/
-  runtimes/        # Runtime protocol + MLXRuntime (llama.cpp planned)
+  runtimes/        # Runtime protocol + MLXRuntime + LlamaCppRuntime
   evals/           # perplexity on WikiText-2, HellaSwag multiple-choice
   profiling/       # generation latency stats, RSS sampling, powermetrics energy
   report/          # JSON schema + machine info + Markdown renderer
