@@ -1,5 +1,7 @@
 # silicon-eval
 
+[![ci](https://github.com/Indy102/silicon-eval/actions/workflows/ci.yml/badge.svg)](https://github.com/Indy102/silicon-eval/actions/workflows/ci.yml)
+
 Evaluation and profiling harness for LLMs on Apple Silicon. Measure the
 quality / performance / efficiency tradeoffs of quantized models across
 runtimes, and decide what to ship on-device with numbers instead of vibes.
@@ -104,6 +106,9 @@ changed ([ADR-003](https://github.com/Indy102/silicon-eval/blob/main/docs/adr/00
   for the methodology.
 - `--hs-items N` — HellaSwag validation items (default 100; small-sample
   noise is real, but variants are compared on identical items).
+- `--mmlu` — add MMLU (zero-shot answer-letter scoring, `--mmlu-items`,
+  off by default). Note tiny models score near chance (0.25) on MMLU —
+  it differentiates meaningfully from ~1B parameters up.
 - `--runs / --warmup` — measured and unmeasured generation repetitions.
 - `--no-perplexity / --no-hellaswag / --no-energy` — skip pieces.
 - `--no-cache` — re-measure everything and refresh the cached entries.
