@@ -212,6 +212,21 @@ The load-bearing decision: evals and profiling depend on a `Runtime`
 measurement code. See
 [docs/adr/001-runtime-abstraction.md](https://github.com/Indy102/silicon-eval/blob/main/docs/adr/001-runtime-abstraction.md).
 
+## Contribute your chip's numbers
+
+The tables above are one machine (M1, 8 GB). Reports from other Apple
+Silicon chips — M2/M3/M4, Pro/Max/Ultra — are the most useful contribution
+this project can receive. Run:
+
+```sh
+silicon-eval run --model mlx-community/Qwen2.5-0.5B-Instruct --quant 4bit,8bit,bf16 \
+    -o report.json --markdown report.md
+```
+
+and open a PR adding both files under `docs/benchmarks/` named
+`qwen2.5-0.5b-<chip>-<date>.{json,md}`. The JSON carries the machine and
+version stamps that make results comparable.
+
 ## Development
 
 ```sh
