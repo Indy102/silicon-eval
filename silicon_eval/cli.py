@@ -11,6 +11,7 @@ from silicon_eval import __version__
 from silicon_eval.cache import ResultCache, cache_key
 from silicon_eval.evals.base import Evaluator
 from silicon_eval.evals.hellaswag import HellaSwagConfig, HellaSwagEvaluator
+from silicon_eval.evals.mmlu import MMLUConfig, MMLUEvaluator
 from silicon_eval.evals.perplexity import PerplexityConfig, PerplexityEvaluator
 from silicon_eval.report.json_io import variant_from_dict, variant_to_dict, write_report_json
 from silicon_eval.report.machine import collect_machine_info
@@ -74,6 +75,11 @@ def run(
     hs_items: Annotated[
         int, typer.Option("--hs-items", help="HellaSwag validation items to score")
     ] = 100,
+    mmlu: Annotated[
+        bool,
+        typer.Option("--mmlu/--no-mmlu", help="Run MMLU knowledge eval (off by default)"),
+    ] = False,
+    mmlu_items: Annotated[int, typer.Option("--mmlu-items", help="MMLU test items to score")] = 100,
     energy: Annotated[
         bool,
         typer.Option(
@@ -105,6 +111,7 @@ def run(
             ppl_windows=ppl_windows,
             ppl_context=ppl_context,
             hs_items=hs_items,
+            mmlu_items=mmlu_items,
         )
         quants = parse_quant_list(quant)
         backend = get_runtime(runtime)
@@ -117,6 +124,8 @@ def run(
         ppl_context=ppl_context,
         hellaswag=hellaswag,
         hs_items=hs_items,
+        mmlu=mmlu,
+        mmlu_items=mmlu_items,
     )
     result_cache = ResultCache()
     base_payload = _cache_payload_base(
@@ -131,6 +140,8 @@ def run(
         ppl_context=ppl_context,
         hellaswag=hellaswag,
         hs_items=hs_items,
+        mmlu=mmlu,
+        mmlu_items=mmlu_items,
         energy=energy,
     )
 
@@ -186,7 +197,14 @@ def run(
 
 
 def _build_evaluators(
-    *, perplexity: bool, ppl_windows: int, ppl_context: int, hellaswag: bool, hs_items: int
+    *,
+    perplexity: bool,
+    ppl_windows: int,
+    ppl_context: int,
+    hellaswag: bool,
+    hs_items: int,
+    mmlu: bool,
+    mmlu_items: int,
 ) -> list[Evaluator]:
     evaluators: list[Evaluator] = []
     if perplexity:
@@ -200,6 +218,8 @@ def _build_evaluators(
         )
     if hellaswag:
         evaluators.append(HellaSwagEvaluator(HellaSwagConfig(max_items=hs_items)))
+    if mmlu:
+        evaluators.append(MMLUEvaluator(MMLUConfig(max_items=mmlu_items)))
     return evaluators
 
 
@@ -258,7 +278,14 @@ def _echo_energy_notes(
 
 
 def _validate_flags(
-    *, runs: int, warmup: int, max_tokens: int, ppl_windows: int, ppl_context: int, hs_items: int
+    *,
+    runs: int,
+    warmup: int,
+    max_tokens: int,
+    ppl_windows: int,
+    ppl_context: int,
+    hs_items: int,
+    mmlu_items: int,
 ) -> None:
     if runs < 1:
         raise ValueError("--runs must be >= 1")
@@ -272,23 +299,27 @@ def _validate_flags(
         raise ValueError("--ppl-context must be >= 1")
     if hs_items < 1:
         raise ValueError("--hs-items must be >= 1")
+    if mmlu_items < 1:
+        raise ValueError("--mmlu-items must be >= 1")
 
 
 def _render_table(variants: list[VariantResult]) -> str:
     header = (
-        f"{'quant':<6} {'ppl':>8} {'hswag':>7} {'ttft (s)':>9} {'gen t/s':>9} "
+        f"{'quant':<6} {'ppl':>8} {'hswag':>7} {'mmlu':>6} {'ttft (s)':>9} {'gen t/s':>9} "
         f"{'peak metal':>11} {'mJ/tok':>8}"
     )
     lines = [header, "-" * len(header)]
     for variant in variants:
-        ppl = _eval_metric(variant, "perplexity")
-        accuracy = _eval_metric(variant, "accuracy_norm")
+        ppl = _eval_metric(variant, "perplexity:wikitext2", "perplexity")
+        hswag = _eval_metric(variant, "hellaswag", "accuracy_norm")
+        mmlu = _eval_metric(variant, "mmlu", "accuracy")
         generation = variant.generation
         energy = variant.energy
         lines.append(
             f"{variant.quantization.value:<6} "
             f"{f'{ppl:.2f}' if ppl is not None else 'n/a':>8} "
-            f"{f'{accuracy:.3f}' if accuracy is not None else 'n/a':>7} "
+            f"{f'{hswag:.3f}' if hswag is not None else 'n/a':>7} "
+            f"{f'{mmlu:.2f}' if mmlu is not None else 'n/a':>6} "
             f"{generation.ttft_s.mean:>9.3f} {generation.generation_tps.mean:>9.1f} "
             f"{_format_mb(generation.peak_metal_bytes):>11} "
             f"{f'{energy.energy_per_generated_token_mj:.1f}' if energy else 'n/a':>8}"
@@ -296,11 +327,12 @@ def _render_table(variants: list[VariantResult]) -> str:
     return "\n".join(lines)
 
 
-def _eval_metric(variant: VariantResult, key: str) -> float | None:
+def _eval_metric(variant: VariantResult, eval_name: str, key: str) -> float | None:
+    """Metric scoped to one evaluator — several evals share key names."""
     for eval_result in variant.evals:
-        value = eval_result.metrics.get(key)
-        if value is not None:
-            return float(value)
+        if eval_result.name == eval_name:
+            value = eval_result.metrics.get(key)
+            return float(value) if value is not None else None
     return None
 
 

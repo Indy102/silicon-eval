@@ -46,6 +46,7 @@ def _comparison_table(variants: list[VariantResult]) -> list[str]:
         "runtime",
         "ppl (wikitext2)",
         "hellaswag acc_norm",
+        "mmlu acc",
         "ttft (s)",
         "gen tok/s",
         "prompt tok/s",
@@ -68,14 +69,16 @@ def _comparison_table(variants: list[VariantResult]) -> list[str]:
 
 def _variant_row(variant: VariantResult) -> list[str]:
     generation = variant.generation
-    ppl = _metric(variant, "perplexity")
-    accuracy_norm = _metric(variant, "accuracy_norm")
+    ppl = _metric(variant, "perplexity:wikitext2", "perplexity")
+    accuracy_norm = _metric(variant, "hellaswag", "accuracy_norm")
+    mmlu_accuracy = _metric(variant, "mmlu", "accuracy")
     energy = variant.energy
     return [
         variant.quantization.value,
         variant.runtime,
         f"{ppl:.2f}" if ppl is not None else "n/a",
         f"{accuracy_norm:.3f}" if accuracy_norm is not None else "n/a",
+        f"{mmlu_accuracy:.3f}" if mmlu_accuracy is not None else "n/a",
         f"{generation.ttft_s.mean:.3f}",
         f"{generation.generation_tps.mean:.1f}",
         f"{generation.prompt_tps.mean:.1f}",
@@ -89,18 +92,24 @@ def _notes(variants: list[VariantResult]) -> list[str]:
     notes: list[str] = []
     first = variants[0] if variants else None
     if first is not None:
-        scored = _metric(first, "scored_tokens")
+        scored = _metric(first, "perplexity:wikitext2", "scored_tokens")
         if scored is not None:
             notes.append(
                 f"Perplexity over the first {scored:.0f} tokens of WikiText-2 (raw, test); "
                 "all variants score the identical prefix. Not comparable to published "
                 "sliding-window numbers."
             )
-        items = _metric(first, "items")
+        items = _metric(first, "hellaswag", "items")
         if items is not None:
             notes.append(
                 f"HellaSwag accuracy over the first {items:.0f} validation items "
                 "(length-normalized log-likelihood scoring)."
+            )
+        mmlu_items = _metric(first, "mmlu", "items")
+        if mmlu_items is not None:
+            notes.append(
+                f"MMLU accuracy over the first {mmlu_items:.0f} test items "
+                "(zero-shot answer-letter scoring)."
             )
         stats = first.generation
         notes.append(
@@ -123,11 +132,12 @@ def _notes(variants: list[VariantResult]) -> list[str]:
     return notes
 
 
-def _metric(variant: VariantResult, key: str) -> float | None:
+def _metric(variant: VariantResult, eval_name: str, key: str) -> float | None:
+    """Metric scoped to one evaluator — several evals share key names."""
     for eval_result in variant.evals:
-        value = eval_result.metrics.get(key)
-        if value is not None:
-            return float(value)
+        if eval_result.name == eval_name:
+            value = eval_result.metrics.get(key)
+            return float(value) if value is not None else None
     return None
 
 

@@ -14,9 +14,8 @@ from tests.conftest import FakeRuntime
 
 
 class CannedEvaluator:
-    name: str = "canned"
-
-    def __init__(self, metrics: dict[str, float | int]) -> None:
+    def __init__(self, name: str, metrics: dict[str, float | int]) -> None:
+        self.name = name
         self._metrics = metrics
 
     def run(self, runtime: Runtime) -> EvalResult:
@@ -24,16 +23,19 @@ class CannedEvaluator:
 
 
 def make_variants(fake_runtime: FakeRuntime) -> list[VariantResult]:
-    evaluator = CannedEvaluator(
-        {"perplexity": 26.16, "scored_tokens": 5120, "accuracy_norm": 0.312, "items": 100}
-    )
+    evaluator = [
+        CannedEvaluator(
+            "perplexity:wikitext2", {"perplexity": 26.16, "scored_tokens": 5120, "windows": 10}
+        ),
+        CannedEvaluator("hellaswag", {"accuracy_norm": 0.312, "accuracy": 0.29, "items": 100}),
+    ]
     q4 = run_variant(
         fake_runtime,
         ModelSpec(model_id="some/model", quantization=Quantization.Q4),
         prompt="p",
         runs=1,
         warmup=0,
-        evaluators=[evaluator],
+        evaluators=evaluator,
     )
     q8 = run_variant(
         fake_runtime,
@@ -41,7 +43,7 @@ def make_variants(fake_runtime: FakeRuntime) -> list[VariantResult]:
         prompt="p",
         runs=1,
         warmup=0,
-        evaluators=[evaluator],
+        evaluators=evaluator,
     )
     q4 = dataclasses.replace(
         q4,

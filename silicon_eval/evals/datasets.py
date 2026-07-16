@@ -15,6 +15,8 @@ _WIKITEXT_SUBSET = "wikitext-2-raw-v1"
 
 _HELLASWAG_REPO = "Rowan/hellaswag"
 
+_MMLU_REPO = "cais/mmlu"
+
 
 def load_wikitext2_text(split: str = "test") -> str:
     """Load a WikiText-2 (raw) split as one concatenated string.
@@ -99,6 +101,36 @@ def _find_hellaswag_parquet(split: str) -> str:
         if f"{split}-" in name and name.endswith(".parquet"):
             return name
     raise DatasetLoadError(f"no {split!r} parquet found in {_HELLASWAG_REPO}")
+
+
+def load_mmlu_records(split: str = "test", max_items: int | None = None) -> list[dict[str, object]]:
+    """Load raw MMLU records (question, subject, choices, answer) — 'all' config.
+
+    Takes the first ``max_items`` rows so every variant in a sweep scores the
+    identical item set. Raises :class:`DatasetLoadError` on failure.
+    """
+    try:
+        local_path = _download_mmlu_split(split)
+        records = _read_rows(Path(local_path))
+    except DatasetLoadError:
+        raise
+    except Exception as exc:
+        raise DatasetLoadError(f"could not load MMLU {split!r} split: {exc}") from exc
+    if max_items is not None:
+        records = records[:max_items]
+    return records
+
+
+def _download_mmlu_split(split: str) -> str:
+    expected = f"all/{split}-00000-of-00001.parquet"
+    try:
+        return hf_hub_download(_MMLU_REPO, expected, repo_type="dataset")
+    except EntryNotFoundError:
+        files = HfApi().list_repo_files(_MMLU_REPO, repo_type="dataset")
+        for name in files:
+            if name.startswith(f"all/{split}-") and name.endswith(".parquet"):
+                return hf_hub_download(_MMLU_REPO, name, repo_type="dataset")
+        raise DatasetLoadError(f"no {split!r} parquet found in {_MMLU_REPO}") from None
 
 
 def _read_rows(path: Path) -> list[dict[str, object]]:

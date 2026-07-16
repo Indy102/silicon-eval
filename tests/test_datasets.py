@@ -166,3 +166,49 @@ def test_hellaswag_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(datasets, "hf_hub_download", offline)
     with pytest.raises(DatasetLoadError, match="could not load HellaSwag"):
         datasets.load_hellaswag_records()
+
+
+def write_mmlu_parquet(path: Path, rows: int) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    pq.write_table(
+        pa.table(
+            {
+                "question": [f"Question {i}?" for i in range(rows)],
+                "subject": ["astronomy" for _ in range(rows)],
+                "choices": [[f"opt {i}{j}" for j in range(4)] for i in range(rows)],
+                "answer": [i % 4 for i in range(rows)],
+            }
+        ),
+        path,
+    )
+
+
+def test_mmlu_uses_known_name_without_listing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parquet = tmp_path / "test.parquet"
+    write_mmlu_parquet(parquet, rows=3)
+
+    def fake_download(repo_id: str, filename: str, *, repo_type: str) -> str:
+        assert repo_id == "cais/mmlu"
+        assert filename == "all/test-00000-of-00001.parquet"
+        return str(parquet)
+
+    monkeypatch.setattr(datasets, "HfApi", ForbiddenApi)
+    monkeypatch.setattr(datasets, "hf_hub_download", fake_download)
+
+    records = datasets.load_mmlu_records(max_items=2)
+    assert len(records) == 2
+    assert records[0]["question"] == "Question 0?"
+    assert records[0]["answer"] == 0
+
+
+def test_mmlu_failure_wrapped(monkeypatch: pytest.MonkeyPatch) -> None:
+    def offline(repo_id: str, filename: str, *, repo_type: str) -> str:
+        raise ConnectionError("no network")
+
+    monkeypatch.setattr(datasets, "hf_hub_download", offline)
+    with pytest.raises(DatasetLoadError, match="could not load MMLU"):
+        datasets.load_mmlu_records()

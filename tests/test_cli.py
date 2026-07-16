@@ -100,6 +100,32 @@ def test_run_no_hellaswag_skips_completions(injected_runtime: FakeRuntime) -> No
     assert injected_runtime.completion_calls == []
 
 
+def test_mmlu_off_by_default_and_flag_enables(
+    injected_runtime: FakeRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from silicon_eval.evals import mmlu as mmlu_module
+
+    mmlu_records: list[dict[str, object]] = [
+        {"question": "Q?", "subject": "astronomy", "choices": ["a", "b", "c", "d"], "answer": 0}
+    ]
+    monkeypatch.setattr(
+        mmlu_module, "load_mmlu_records", lambda max_items=None: mmlu_records[:max_items]
+    )
+
+    default = runner.invoke(cli.app, ["run", "--model", "m", "--no-hellaswag"])
+    assert default.exit_code == 0
+    assert "n/a" in default.output  # mmlu column absent by default
+    assert injected_runtime.completion_calls == []
+
+    enabled = runner.invoke(
+        cli.app, ["run", "--model", "m", "--no-hellaswag", "--mmlu", "--mmlu-items", "1"]
+    )
+    assert enabled.exit_code == 0
+    letters = {call[1] for call in injected_runtime.completion_calls}
+    assert letters == {" A", " B", " C", " D"}
+    assert "1.00" in enabled.output  # answer 0 wins the uniform-NLL tie → correct
+
+
 def test_hs_items_flag_plumbed(injected_runtime: FakeRuntime) -> None:
     result = runner.invoke(cli.app, ["run", "--model", "m", "--hs-items", "1"])
     assert result.exit_code == 0
