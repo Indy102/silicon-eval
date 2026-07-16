@@ -115,3 +115,73 @@ def test_real_pipeline_end_to_end() -> None:
     markdown = render_markdown(report)
     assert "| 4bit" in markdown
     assert variant_from_dict(variant_to_dict(variant)) == variant  # cache round trip
+
+
+GGUF_MODEL = "Qwen/Qwen2.5-0.5B-Instruct-GGUF"
+GGUF_SPEC = ModelSpec(model_id=GGUF_MODEL, quantization=Quantization.Q4)
+
+
+@pytest.fixture(scope="module")
+def loaded_llamacpp():  # type: ignore[no-untyped-def]  # LlamaCppRuntime import is conditional
+    pytest.importorskip("llama_cpp")
+    from silicon_eval.runtimes.llamacpp_runtime import LlamaCppRuntime
+
+    runtime = LlamaCppRuntime()
+    runtime.load(GGUF_SPEC)
+    yield runtime
+    runtime.unload()
+
+
+def test_real_llamacpp_generation(loaded_llamacpp: object) -> None:
+    from silicon_eval.runtimes.llamacpp_runtime import LlamaCppRuntime
+
+    assert isinstance(loaded_llamacpp, LlamaCppRuntime)
+    result = loaded_llamacpp.generate("The capital of France is", max_tokens=16)
+
+    assert result.text.strip()
+    assert result.metrics.prompt_tokens > 0
+    assert 0 < result.metrics.generation_tokens <= 16
+    assert result.metrics.time_to_first_token_s > 0
+    assert result.metrics.generation_tps > 0
+    assert result.metrics.peak_memory_bytes is None
+
+
+def test_real_llamacpp_scoring(loaded_llamacpp: object) -> None:
+    from silicon_eval.runtimes.llamacpp_runtime import LlamaCppRuntime
+
+    assert isinstance(loaded_llamacpp, LlamaCppRuntime)
+    score = loaded_llamacpp.score(SAMPLE_TEXT, max_context_tokens=64)
+    perplexity = math.exp(score.negative_log_likelihood / score.scored_tokens)
+    assert 1.0 < perplexity < 1000.0
+
+    paris = loaded_llamacpp.score_completion("The capital of France is", " Paris")
+    zebra = loaded_llamacpp.score_completion("The capital of France is", " zebra")
+    paris_nll = paris.negative_log_likelihood / paris.scored_tokens
+    zebra_nll = zebra.negative_log_likelihood / zebra.scored_tokens
+    assert paris_nll < zebra_nll
+
+
+def test_cross_runtime_agreement() -> None:
+    """The two runtimes must broadly agree on the same model at ~4bit.
+
+    Different quantization schemes and tokenizers mean the numbers won't be
+    identical — but per-token NLL on the same English text should land in
+    the same ballpark, and both must prefer the true completion.
+    """
+    pytest.importorskip("mlx_lm")
+    pytest.importorskip("llama_cpp")
+    from silicon_eval.runtimes.llamacpp_runtime import LlamaCppRuntime
+
+    nlls: dict[str, float] = {}
+    for runtime, spec in (
+        (MLXRuntime(), TINY_SPEC),
+        (LlamaCppRuntime(), GGUF_SPEC),
+    ):
+        runtime.load(spec)
+        try:
+            score = runtime.score(SAMPLE_TEXT, max_context_tokens=64)
+            nlls[runtime.name] = score.negative_log_likelihood / score.scored_tokens
+        finally:
+            runtime.unload()
+
+    assert abs(nlls["mlx"] - nlls["llama.cpp"]) < 1.5, nlls  # same ballpark (nats)
