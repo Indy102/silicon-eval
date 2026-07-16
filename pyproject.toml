@@ -34,6 +34,9 @@ dependencies = [
 mlx = [
     "mlx-lm>=0.20",
 ]
+llamacpp = [
+    "llama-cpp-python>=0.3",
+]
 dev = [
     "ruff>=0.8",
     "mypy>=1.13",
@@ -79,9 +82,18 @@ select = [
 strict = true
 files = ["silicon_eval", "tests"]
 
-# mlx/mlx-lm/pyarrow ship no type stubs.
+# mlx/mlx-lm/llama-cpp-python/pyarrow ship no usable type stubs.
 [[tool.mypy.overrides]]
-module = ["mlx", "mlx.*", "mlx_lm", "mlx_lm.*", "pyarrow", "pyarrow.*"]
+module = [
+    "mlx",
+    "mlx.*",
+    "mlx_lm",
+    "mlx_lm.*",
+    "llama_cpp",
+    "llama_cpp.*",
+    "pyarrow",
+    "pyarrow.*",
+]
 ignore_missing_imports = true
 follow_imports = "skip"
 

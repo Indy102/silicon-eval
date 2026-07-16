@@ -12,15 +12,18 @@ from silicon_eval.runtimes.base import (
     Runtime,
     parse_quant_list,
 )
+from silicon_eval.runtimes.llamacpp_runtime import LlamaCppRuntime
 from silicon_eval.runtimes.mlx_runtime import MLXRuntime
 
 _REGISTRY: dict[str, Callable[[], Runtime]] = {
     "mlx": MLXRuntime,
+    "llama.cpp": LlamaCppRuntime,
 }
 
 # Distributions whose versions determine a runtime's measured numbers.
 _BACKEND_DISTS: dict[str, tuple[str, ...]] = {
     "mlx": ("mlx", "mlx-lm"),
+    "llama.cpp": ("llama-cpp-python",),
 }
 
 
@@ -59,6 +62,7 @@ def backend_versions(name: str) -> dict[str, str]:
 __all__ = [
     "GenerationMetrics",
     "GenerationResult",
+    "LlamaCppRuntime",
     "MLXRuntime",
     "ModelSpec",
     "Quantization",
